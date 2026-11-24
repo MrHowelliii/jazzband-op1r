@@ -77,7 +77,7 @@ and browsers; do not rely on browser storage as your only library copy.
 
 The `sound packs` folder holds five plugins with recorded instruments: jbpiano, jbbass, jbguitar, jbdrums, jbnylon (3.1 MB,
 credits in `sound packs/CREDITS.md`). In the companion open **Real instrument sounds**, choose the `.op1p` files,
-click **Send sound packs to OP-1** and press **T1** when asked (one restart for all four). The upload shows its speed
+click **Send sound packs to OP-1** and press **T1** when asked (one restart for all of them). The upload shows its speed
 and the time left. On the OP-1 every player uses its pack (1.5). Update the Jazz
 Band plugin to 0.9 first: older versions ignore the packs.
 
