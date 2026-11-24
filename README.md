@@ -6,6 +6,9 @@ folder access depend on browser support and permission. If those are unavailable
 opening a local file, serve this folder with `python3 -m http.server 8765 --bind 127.0.0.1`
 and open `http://127.0.0.1:8765/Jazz%20Band%20Companion.html`.
 
+**New to Jazz Band, or updating?** Start with the [User Guide](USER-GUIDE.md): setup, every screen and setting, and all
+42 players.
+
 ## Plugin 1.5: 42 players, bossa nova, samples only
 
 SETUP BAND has 12 drummers (new: Tony Williams, Roy Haynes, Billy Higgins, Jo Jones, Jack DeJohnette, Max Roach,
