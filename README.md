@@ -31,7 +31,10 @@ the plugin built natively (`make test-web`).
   browser. Served next to a `sound packs` folder holding them, the page loads them by itself.
 - *Play along over MIDI* (Chrome / Edge) sends one part, and optionally clock, to the OP-1 as before.
 
-**On iPhone / iPad:** Safari needs the page from a web address (opening the .html from Files does not run it). Put
+**On iPhone / iPad:** Safari needs the page from a web address (opening the .html from Files does not run it). The
+repository publishes itself with GitHub Pages (Settings → Pages → deploy from a branch, `/ (root)`):
+`https://mrhowelliii.github.io/jazzband-op1r/` (`index.html` opens `Jazz Band.html`). Sound packs are not in the
+repository, so load them once per device with *Load sound packs…*. Or put
 `Jazz Band Companion.html` (and optionally the `sound packs` folder) on any static web host, or serve this folder
 from a Mac on the same Wi-Fi (`python3 -m http.server 8765`, then open `http://<mac-name>.local:8765/Jazz%20Band%20Companion.html`).
 Add it to the Home Screen for a full-screen app. Sound starts on the first tap; iOS 17 and later play with the
