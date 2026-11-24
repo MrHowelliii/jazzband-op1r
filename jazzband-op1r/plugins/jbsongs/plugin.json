@@ -1,0 +1,10 @@
+{
+  "name": "jbsongs",
+  "author": "Brandon",
+  "kind": "fx",
+  "symbol": "FX_jbsongs",
+  "sources": ["jbsongs.c"],
+  "defaults": [0, 0, 0, 0],
+  "stereo": true,
+  "screen": { "svg": "jbsongs.svg", "symbol": "SCREEN_jbsongs" }
+}

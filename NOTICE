@@ -1,0 +1,18 @@
+Jazz Band for OP1r
+
+The Jazz Band plugin identifies its license as GPL-3.0-or-later with the OP-1
+firmware permission. Copyright notices in source files remain authoritative.
+See LICENSE for GPLv3 and UPSTREAM-NOTICE for the upstream OP1r notices.
+The upstream notice describes the broader OP1r project, not an inventory of
+components included in this repository.
+
+ADDITIONAL PERMISSION (GPL-3.0 section 7)
+As an additional permission, you may combine this program, or a work based on it,
+with the Teenage Engineering OP-1 firmware (original or patched) and convey the
+resulting combination, provided that the parts of the combination that are this
+program or based on it are conveyed under the terms of the GPL with this
+additional permission. The OP-1 firmware itself is not covered by this license.
+
+Audio assets have separate licenses: see sound packs/CREDITS.md and
+jazzband-op1r/packs/SOURCES.md. Do not treat the software license as a grant
+of rights to firmware, artist names, trademarks, or imported song collections.

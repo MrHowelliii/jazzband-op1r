@@ -1,0 +1,11 @@
+{
+  "name": "jazzband",
+  "author": "Brandon",
+  "kind": "fx",
+  "symbol": "FX_jazzband",
+  "sources": ["jazzband.c"],
+  "defaults": [14894, 24000, 0, 0],
+  "stereo": true,
+  "cflags": ["-fno-tree-loop-distribute-patterns"],
+  "screen": { "svg": "jazzband.svg", "symbol": "SCREEN_jazzband" }
+}

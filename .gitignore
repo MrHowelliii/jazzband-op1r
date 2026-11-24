@@ -1,0 +1,38 @@
+# Local history, toolchains and OS files
+.DS_Store
+._*
+/_backup*/
+/_toolchain/
+*.zip
+__pycache__/
+*.py[cod]
+*.dSYM/
+.env
+.env.*
+*.pem
+*.key
+
+# Generated audio, host binaries, reports and build products
+/jazzband-op1r/out/
+/jazzband-op1r/packs/out/
+*.so
+*.o
+*.op1p
+!/jazzband-op1r/plugins/jbpack/jbpack-template.op1p
+!/jazzband-op1r/plugins/jbsongs/jbsongs-template.op1p
+/Jazz Band Companion.html
+/tests/*-test.raw
+/tests/ireal-demo.html
+/tests/library-demo.json
+/tests/workspace-desktop.jpg
+/releases/
+
+# Historical coordination notes, retained locally
+/COMPANION-PLAN.md
+/PLUGIN-UX-HANDOFF.md
+
+# Firmware and personal libraries must never enter this repository
+*.op1
+*.syx
+/personal/
+/libraries/

@@ -1,0 +1,10 @@
+{
+  "name": "jbpack",
+  "author": "Brandon",
+  "kind": "fx",
+  "symbol": "FX_jbpack",
+  "sources": ["jbpack.c"],
+  "defaults": [0, 0, 0, 0],
+  "stereo": true,
+  "screen": { "svg": "jbpack.svg", "symbol": "SCREEN_jbpack" }
+}

@@ -1,0 +1,47 @@
+{
+  "version": "1.5",
+  "status": "testing baseline; hardware acceptance pending",
+  "artifacts": [
+    {
+      "path": "jazzband.op1p",
+      "bytes": 123545,
+      "sha256": "d790363c3a53b9e380769e163c3b7d0f3de751ca63ab3989a644df2aca81c872"
+    },
+    {
+      "path": "jazzband-op1r/jazzband.op1p",
+      "bytes": 123545,
+      "sha256": "d790363c3a53b9e380769e163c3b7d0f3de751ca63ab3989a644df2aca81c872"
+    },
+    {
+      "path": "Jazz Band Companion.html",
+      "bytes": 177904,
+      "sha256": "cc762a08b0d21f2335e0480253378fac64ec2cfa8684b71a5d493fe681fd9bdc"
+    },
+    {
+      "path": "sound packs/jbbass.op1p",
+      "bytes": 514385,
+      "sha256": "f3a07d09371c2f07183066f11f33fe243cc016b8035227576b40bbba35dc5656"
+    },
+    {
+      "path": "sound packs/jbdrums.op1p",
+      "bytes": 814265,
+      "sha256": "0c835d3107ce388900106afc148d92d7990c91404d66cc1e7786ac5464293097"
+    },
+    {
+      "path": "sound packs/jbguitar.op1p",
+      "bytes": 498937,
+      "sha256": "069d4c7755e4553e834b55d9d13e68fbc826f281164663929753c0076f6fb870"
+    },
+    {
+      "path": "sound packs/jbnylon.op1p",
+      "bytes": 150625,
+      "sha256": "0de89c61c739954741f867276f12d5936cded047c3f83c31c6527492d4100a24"
+    },
+    {
+      "path": "sound packs/jbpiano.op1p",
+      "bytes": 1160229,
+      "sha256": "1dc85ef4f2835635385e31234df61cf22a235735ec76112ce86b1d974f91a106"
+    }
+  ],
+  "note": "Preserved existing files without rebuilding. Matching source/binary provenance is not independently established."
+}
