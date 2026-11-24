@@ -20,6 +20,9 @@ relationship without asserting that local source was used to build a binary.
 Before publishing a stable release, verify the matching build and hardware tests.
 
 For future changes, create a branch, keep source and documentation together, run
-the relevant checks, and publish a release tied to its source commit. Preserve
+the relevant checks, and publish a release tied to its source commit. GitHub
+Actions (`.github/workflows/build.yml`) builds `jazzband.op1p`, `jbsongs.op1p`
+and `jbpack.op1p` with op1r's SDK and toolchain on every push, runs the PC tests,
+and attaches the plugin files to the run. Preserve
 sample attribution and upstream notices. See `README.md` and
 `jazzband-op1r/README.md` for existing usage and build details.

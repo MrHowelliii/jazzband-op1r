@@ -283,6 +283,9 @@ You need: an original OP-1, a Mac with Chrome, and Docker Desktop to compile the
    python3 pluginkit.py check jazzband                          # op1r's own host test and previews
    python3 make_plugin.py plugins/jazzband                      # -> build/plugins/jazzband.op1p
    ```
+   Or let GitHub build it: every push runs `.github/workflows/build.yml`, which does the steps above (op1r 73's SDK
+   and toolchain) and runs the PC tests. Download `jazzband.op1p` from the run's **op1r-plugins** artifact
+   (Actions tab, open the run, Artifacts). The first run builds the toolchain (about 45 minutes); later runs reuse it.
 3. **Copy it to the OP-1** with the web patcher's plugin install, or with
    `python3 ../tools/op1push.py <tree> --port <OP-1 MIDI port> --files plugins/jazzband.op1p`. Restart the OP-1.
 4. **Play.** Mixer → master FX → **jazzband**. Press red. Press green to mute/unmute the band while keeping your live

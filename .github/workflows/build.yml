@@ -1,0 +1,110 @@
+# Builds the OP-1 plugins (jazzband, jbsongs, jbpack) with op1r's own SDK and Blackfin toolchain, and runs the PC tests.
+# The .op1p files are attached to each run as the "op1r-plugins" artifact (Actions tab > the run > Artifacts).
+#
+# The toolchain is op1r's toolchain/Dockerfile (binutils 2.40 + gcc 12.3 for bfin-elf, built from source). The first run
+# builds it (about 45 minutes); later runs restore it from the Actions cache in a few minutes. The cache is dropped
+# after 7 days without a run, and the next run builds it again.
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # op1r-src "op1r 73", the SDK jazzband 1.5 is documented against (73 to 76 leave the plugin API, loader and toolchain as they are)
+  OP1R_REPO: pcppcp/op1r-src
+  OP1R_REF: f73bc17f98ebbcc559741accec9c068a2440be7e
+
+jobs:
+  host-tests:
+    name: PC tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: jazzband
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.OP1R_REPO }}
+          ref: ${{ env.OP1R_REF }}
+          path: op1r-src
+      - name: Host tests (mock op1r API, ASan + UBSan)
+        working-directory: jazzband/jazzband-op1r
+        # test-songbook, test-usb and test-packs need the built sound packs (packs/out), which are not in the repository
+        run: make test test-styles test-setlists test-form
+      - name: op1r pluginkit check (op1r's own SDK header and host harness)
+        run: |
+          sdk=op1r-src/synth_sdk
+          cp -r jazzband/jazzband-op1r/plugins/jazzband "$sdk/plugins/"
+          cd "$sdk" && python3 pluginkit.py check plugins/jazzband
+
+  plugins:
+    name: OP-1 plugins (.op1p)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: jazzband
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.OP1R_REPO }}
+          ref: ${{ env.OP1R_REF }}
+          path: op1r-src
+      - uses: docker/setup-buildx-action@v3
+      - name: Blackfin toolchain (op1r's Dockerfile, cached)
+        uses: docker/build-push-action@v6
+        with:
+          context: op1r-src/toolchain
+          tags: bfin-elf-toolchain
+          load: true
+          cache-from: type=gha,scope=bfin-elf-toolchain
+          cache-to: type=gha,mode=max,scope=bfin-elf-toolchain
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pyelftools
+      - name: make_plugin.py jazzband jbsongs jbpack
+        run: |
+          sdk=op1r-src/synth_sdk
+          for p in jazzband jbsongs jbpack; do
+            rm -rf "$sdk/plugins/$p" && cp -r "jazzband/jazzband-op1r/plugins/$p" "$sdk/plugins/"
+          done
+          cd "$sdk" && python3 make_plugin.py plugins/jazzband plugins/jbsongs plugins/jbpack
+      - name: Summary
+        run: |
+          b=op1r-src/synth_sdk/build/plugins t=jazzband/jazzband-op1r/plugins
+          {
+            echo "### OP-1 plugins (op1r ${OP1R_REF:0:7})"
+            echo "| File | Bytes | SHA-256 |"
+            echo "|---|---|---|"
+            for f in jazzband jbsongs jbpack; do
+              echo "| $f.op1p | $(stat -c %s "$b/$f.op1p") | \`$(sha256sum "$b/$f.op1p" | cut -c1-64)\` |"
+            done
+            echo
+            for p in jbsongs jbpack; do   # the tracked templates are build outputs of these sources
+              if cmp -s "$b/$p.op1p" "$t/$p/$p-template.op1p"; then
+                echo "- $p: same bytes as the tracked \`$p-template.op1p\`"
+              else
+                echo "- $p: **differs** from the tracked \`$p-template.op1p\` (rebuild the template if $p changed)"
+              fi
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: op1r-plugins
+          path: |
+            op1r-src/synth_sdk/build/plugins/jazzband.op1p
+            op1r-src/synth_sdk/build/plugins/jbsongs.op1p
+            op1r-src/synth_sdk/build/plugins/jbpack.op1p
+            op1r-src/synth_sdk/build/plugins/*.funcs.json
+          if-no-files-found: error
