@@ -330,21 +330,18 @@ static void pk_scan(void) {                             /* audio thread, every b
 static const jbzone_t *pk_zone(int inst, int key, int vel) {
     const jbpack_t *p = PKS.ok[inst];
     if (!p) return 0;
-    int bd = 999, root = -1;
+    /* one pass: the takes of the nearest root so far, in table order (a nearer root starts the list again; a root
+     * only becomes the nearest at its first zone, so its list is complete) */
+    uint8_t take[JBP_MAXZ]; int bd = 999, root = -1, n = 0;
     for (uint32_t i = 0; i < p->nzones; i++) {
         const jbzone_t *z = &p->zone[i];
         if (vel < z->vlo || vel > z->vhi) continue;
         int d = inst == I_DRUMS ? (z->key == key ? 0 : 999) : iabs(key - z->key);
-        if (d < bd) { bd = d; root = z->key; }
+        if (d < bd) { bd = d; root = z->key; n = 0; }
+        if (z->key == root) take[n++] = (uint8_t)i;
     }
     if (root < 0 || bd > 12) return 0;
-    int n = 0; for (uint32_t i = 0; i < p->nzones; i++) { const jbzone_t *z = &p->zone[i]; n += z->key == root && vel >= z->vlo && vel <= z->vhi; }
-    int pick = PKS.rr[inst]++ % n;
-    for (uint32_t i = 0; i < p->nzones; i++) {
-        const jbzone_t *z = &p->zone[i];
-        if (z->key == root && vel >= z->vlo && vel <= z->vhi && pick-- == 0) return z;
-    }
-    return 0;
+    return &p->zone[take[PKS.rr[inst]++ % n]];
 }
 static const int16_t PK_STEP[89] = {
     7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31,
@@ -371,18 +368,25 @@ static const int16_t PK_MULAW[256] = {
     876, 844, 812, 780, 748, 716, 684, 652, 620, 588, 556, 524, 492, 460, 428, 396,
     372, 356, 340, 324, 308, 292, 276, 260, 244, 228, 212, 196, 180, 164, 148, 132,
     120, 112, 104, 96, 88, 80, 72, 64, 56, 48, 40, 32, 24, 16, 8, 0};
-static int32_t pk_next(voice_t *v) {
-    int32_t i = v->pk_pos++;
-    if (v->pk_codec) return PK_MULAW[v->pk_d[i]];
-    int nib = (v->pk_d[i >> 1] >> ((i & 1) << 2)) & 15, step = PK_STEP[v->pk_idx], diff = step >> 3;
+/* one IMA ADPCM nibble: returns the new predictor and moves the step index *ix */
+static inline int32_t pk_adpcm(int32_t pred, int *ix, int nib) {
+    int step = PK_STEP[*ix], diff = step >> 3;
     if (nib & 4) diff += step;
     if (nib & 2) diff += step >> 1;
     if (nib & 1) diff += step >> 2;
-    int32_t y = v->pk_pred + ((nib & 8) ? -diff : diff);
+    int32_t y = pred + ((nib & 8) ? -diff : diff);
     if (y > 32767) y = 32767; else if (y < -32768) y = -32768;
-    int ix = v->pk_idx + PK_IDX[nib & 7];
-    v->pk_pred = y; v->pk_idx = (uint8_t)(ix < 0 ? 0 : ix > 88 ? 88 : ix);
+    int i = *ix + PK_IDX[nib & 7];
+    *ix = i < 0 ? 0 : i > 88 ? 88 : i;
     return y;
+}
+static int32_t pk_next(voice_t *v) {
+    int32_t i = v->pk_pos++;
+    if (v->pk_codec) return PK_MULAW[v->pk_d[i]];
+    int ix = v->pk_idx;
+    v->pk_pred = pk_adpcm(v->pk_pred, &ix, (v->pk_d[i >> 1] >> ((i & 1) << 2)) & 15);
+    v->pk_idx = (uint8_t)ix;
+    return v->pk_pred;
 }
 
 /* songbook: "JBSB" v1, u32 length, text, fnv32. Text: one song per line: TITLE;key;minor;ballad;chart */
@@ -523,19 +527,21 @@ static int field(const char *p, const char *end, int k, const char **fs) {   /* 
 }
 static const char *line_end(const char *p) { const char *e = B.bt + B.got; while (p < e && *p != '\n') p++; return p; }
 static int atoi_n(const char *p, int n) { int v = 0; for (int i = 0; i < n && p[i] >= '0' && p[i] <= '9'; i++) v = v * 10 + p[i] - '0'; return v; }
-/* song i: title (not 0-terminated for book songs), key, minor, chart (pointer + length) */
+/* song i: title (not 0-terminated for book songs), key, minor, chart (pointer + length; chart 0: not wanted, which
+ * saves walking the whole chart to measure it: the screen asks for titles and keys every frame) */
 static void song_info(int i, const char **title, int *tlen, int *key, int *minor, const char **chart, int *clen) {
     if (B.ok && i < B.n) {
         const char *p = B.bt + B.line[i], *end = B.bt + B.got, *f;
         *tlen = field(p, end, 0, title);
         int n = field(p, end, 1, &f); *key = atoi_n(f, n) % 12;
         n = field(p, end, 2, &f); *minor = n > 0 && f[0] == '1';
-        *clen = field(p, end, 4, chart);
+        if (chart) *clen = field(p, end, 4, chart);
         return;
     }
     if (i >= JB_NSONGS) i = 0;
     *title = SONGS[i].title; *tlen = 0; while ((*title)[*tlen]) (*tlen)++;
-    *key = SONGS[i].key; *minor = SONGS[i].minor; *chart = SONGS[i].chart; *clen = 0; while ((*chart)[*clen]) (*clen)++;
+    *key = SONGS[i].key; *minor = SONGS[i].minor;
+    if (chart) { *chart = SONGS[i].chart; *clen = 0; while ((*chart)[*clen]) (*clen)++; }
 }
 
 /* song i's feel: songbook field 3 (0 swing, 1 ballad, 2 bossa nova); the built-in songs swing */
@@ -692,8 +698,8 @@ static int wrapk(int s) { s = pcof(s); return s > 6 ? s - 12 : s; }   /* -5..+6 
 static chord_t mkc(int root, int q) { chord_t c; c.root = (int8_t)pcof(root); c.q = (uint8_t)q; return c; }
 /* the home chord: the song's key (major 6 / minor 6); a dominant first chord on the key (a blues) stays dominant */
 static chord_t tonic(const jb_t *e) {
-    const char *t, *ch; int tl, key, minor, cl;
-    song_info(e->song, &t, &tl, &key, &minor, &ch, &cl);
+    const char *t; int tl, key, minor;
+    song_info(e->song, &t, &tl, &key, &minor, 0, 0);
     chord_t f = e->bars[0].beat[0];
     if (f.root == key && (f.q == Q_DOM7 || (minor ? f.q == Q_MIN6 || f.q == Q_MINMAJ7 : f.q == Q_MAJ6 || f.q == Q_MAJ7))) return f;
     return mkc(key, minor ? Q_MIN6 : Q_MAJ6);
@@ -1742,9 +1748,11 @@ static void trigger(jb_t *e, const ev_t *ev, int32_t blocks_per_tick_q8) {
     v->active = 1; v->dec = 32767; v->rel = 31000; v->pl = v->pr = 23170;
     v->len = (ev->dur * blocks_per_tick_q8) >> 8;
     if (pz) {                                                                     /* a sound pack zone */
-        /* gains matched to the synths (test/packs_test.c, first half second); vel2 * G() stays below 2^31: G <= 2000 */
-        enum { PK_GN = 452 };                                                    /* jbnylon */
-        static const int16_t PK_G[4] = {0, 1230, 1530, 750}, PK_DG[D_N] = {740, 1950, 600, 52, 390, 810, 1490, 1920, 26, 600};   /* by instrument / drum */
+        /* gains matched to the synths (test/packs_test.c, first half second); vel2 * G() stays below 2^31: G <= 2000.
+         * G() is applied here, at compile time (at run time it is a 64-bit multiply and divide per note) */
+        static const int32_t PK_GN = G(452);                                     /* jbnylon */
+        static const int32_t PK_G[4] = {0, G(1230), G(1530), G(750)},             /* by instrument / drum */
+                             PK_DG[D_N] = {G(740), G(1950), G(600), G(52), G(390), G(810), G(1490), G(1920), G(26), G(600)};
         static const int16_t DPL[D_N] = {23170, 21981, 18678, 25905, 17183, 23170, 25000, 19000, 26500, 18000},
                              DPR[D_N] = {23170, 24302, 26921, 20066, 27902, 23170, 21000, 26500, 19000, 27500};
         int d = ev->inst == I_DRUMS ? 0 : note - pz->key; if (d < -48) d = -48; if (d > 48) d = 48;
@@ -1757,11 +1765,11 @@ static void trigger(jb_t *e, const ev_t *ev, int32_t blocks_per_tick_q8) {
         v->rel = JB_REL_SMP;
         if (ev->inst == I_DRUMS) {
             int k = note < D_N ? note : D_STICK;
-            v->g = mul30(vel2 * G(PK_DG[k]), e->lvl[0]); v->gprev = v->g >> 15; v->len = 0x7FFFFFFF;
+            v->g = mul30(vel2 * PK_DG[k], e->lvl[0]); v->gprev = v->g >> 15; v->len = 0x7FFFFFFF;
             v->pl = DPL[k]; v->pr = DPR[k];
             return;
         }
-        v->g = mul30(vel2 * G(pki == PK_NYLON ? PK_GN : PK_G[ev->inst]), e->lvl[ev->inst == I_BASS ? 1 : ev->inst == I_PIANO ? 2 : 3]); v->gprev = 0;
+        v->g = mul30(vel2 * (pki == PK_NYLON ? PK_GN : PK_G[ev->inst]), e->lvl[ev->inst == I_BASS ? 1 : ev->inst == I_PIANO ? 2 : 3]); v->gprev = 0;
         if (ev->inst == I_PIANO) {
             int32_t pan = -9830 + (note - 60) * 364;
             v->pl = (int16_t)(23170 - ((pan * 11585) >> 15)); v->pr = (int16_t)(23170 + ((pan * 11585) >> 15));
@@ -1876,7 +1884,10 @@ static void trigger(jb_t *e, const ev_t *ev, int32_t blocks_per_tick_q8) {
     if (v->gprev) v->gprev = v->g >> 15;
 }
 
-/* one voice, one 64-sample block, mixed into L / R (or the guitar bus G) */
+/* one voice, one 64-sample block, mixed into L / R (or the guitar bus G).
+ * One loop per voice type, its state in locals for the block: the type is fixed for the block (no switch per sample),
+ * and the int32_t buses could alias the voice's int32_t state, so with the state left in *v every bus store would
+ * force the compiler to store and reload it. The arithmetic is unchanged, sample for sample. */
 static void render_voice(jb_t *e, voice_t *v, int32_t *L, int32_t *R, int32_t *Gb) {
     int start = 0;
     if (v->wait >= OP1_FX_BLOCK) { v->wait -= OP1_FX_BLOCK; return; }
@@ -1888,70 +1899,126 @@ static void render_voice(jb_t *e, voice_t *v, int32_t *L, int32_t *R, int32_t *G
     int32_t g1 = v->g >> 15, dg = (g1 - g0) * 8;                                  /* per-sample ramp over 64 samples, Q15 << 9 */
     int32_t gacc = g0 << 9;
     v->gprev = g1;
-    if (v->type == VT_KICK) { v->inc[0] = JB_INC_48HZ + (uint32_t)(((JB_INC_75HZ >> 15) * v->pitch)); v->pitch = (v->pitch * JB_DEC_KICKP) >> 15; }
-    for (int n = start; n < OP1_FX_BLOCK; n++) {
-        int32_t s = 0;
-        switch (v->type) {
-        case VT_KICK: v->ph[0] += v->inc[0]; s = op1_sin((int32_t)(v->ph[0] >> 19)); break;
-        case VT_SNARE: {
-            v->ph[0] += v->inc[0];
-            int32_t x = noise(e);
-            v->hy = (JB_HP80 * (v->hy + x - v->hx)) >> 15; v->hx = x;
-            s = ((op1_sin((int32_t)(v->ph[0] >> 19)) * v->pa[0]) >> 16) + ((v->hy * 22938) >> 15);
-        } break;
-        case VT_RIDE: case VT_HAT: case VT_CRASH: {
-            int32_t m = 0;
-            for (int i = 0; i < 6; i++) { v->ph[i] += v->inc[i]; m += (int32_t)v->ph[i] < 0 ? -1 : 1; }
-            int32_t x = v->type == VT_RIDE ? m * 3277 + ((noise(e) * 8192) >> 15)
-                      : v->type == VT_HAT ? m * 3823 + ((noise(e) * 16384) >> 15)
-                                          : m * 2731 + ((noise(e) * 22938) >> 15);
-            v->hy = (JB_HP82 * (v->hy + x - v->hx)) >> 15; v->hx = x;
-            v->hy2 = (JB_HP82 * (v->hy2 + v->hy - v->hx2)) >> 15; v->hx2 = v->hy;
-            s = v->hy2;
-            if (v->type == VT_RIDE) { v->ph[6] += v->inc[6]; s += (op1_sin((int32_t)(v->ph[6] >> 19)) * 4588) >> 15; }
-        } break;
-        case VT_STICK: { int32_t x = noise(e); v->hy = (JB_HP60 * (v->hy + x - v->hx)) >> 15; v->hx = x; s = v->hy; } break;
-        case VT_BASS: case VT_PIANO:
-            for (int i = 0; i < v->np; i++) { v->ph[i] += v->inc[i]; s += (op1_sin((int32_t)(v->ph[i] >> 19)) * v->pa[i]) >> 15; }
-            break;
-        case VT_EP: case VT_FMB: {                                                /* 2-op FM, 1:1 */
-            v->ph[0] += v->inc[0]; v->ph[1] += v->inc[1];
-            int32_t m = op1_sin((int32_t)(v->ph[1] >> 19));
-            s = op1_sin((int32_t)(v->ph[0] >> 19) + ((m * v->pa[0]) >> 15));
-        } break;
-        case VT_PK: {                                                             /* pack: decode on the fly, linear interpolation */
-            if (v->pk_pos > v->pk_len) { v->active = 0; goto done; }
-            s = v->pk_s0 + (((v->pk_s1 - v->pk_s0) * (int32_t)(v->pk_frac >> 1)) >> 15);
-            v->pk_frac += v->pk_inc;
-            while (v->pk_frac >= 65536) {
-                v->pk_frac -= 65536; v->pk_s0 = v->pk_s1;
-                if (v->pk_pos < v->pk_len) v->pk_s1 = pk_next(v); else { v->pk_s1 = 0; v->pk_pos++; }
-            }
-        } break;
-        case VT_SMP: {
-            if (v->spos >= v->send - 1) { v->active = 0; goto done; }
-            int32_t a = v->sd[v->spos], b = v->sd[v->spos + 1];
-            s = a + (((b - a) * (int32_t)(v->sfrac >> 1)) >> 15);
-            v->sfrac += v->sinc; v->spos += (int32_t)(v->sfrac >> 16); v->sfrac &= 0xFFFF;
-            int32_t left = v->send - v->spos;
-            if (left < 512) s = (s * left) >> 9;                                  /* fade at the end of the zone */
-            s = (s * v->sgain) >> 15;
-        } break;
-        case VT_GUITAR: {
-            int p = v->kspos, q = p + 1; if (q >= v->ksn) q = 0;
-            int32_t y = v->ks[p], avg = ((y + v->ks[q]) * v->ksfb) >> 16;
-            int32_t ap = ((v->apc * (avg - v->apy)) >> 15) + v->apx;
-            v->apx = avg; v->apy = ap;
-            v->ks[p] = op1_sat16(ap); v->kspos = (int16_t)q; s = y;
-        } break;
+    const int32_t pl = v->pl, pr = v->pr;
+    uint32_t nz = e->nz;                                                          /* the noise generator, for this voice's block */
+    int n = start;
+#define JB_NOISE() ((int32_t)(nz = nz * 1664525u + 1013904223u) >> 16)            /* = noise(e) */
+#define JB_GAIN(s) do { gacc += dg; x = (((s) >> 2) * (gacc >> 9)) >> 13;          /* |s| < 2^17, gain < 2^16: no 32-bit overflow */ \
+                        if (x > 65535) x = 65535; else if (x < -65535) x = -65535; } while (0)   /* x * pan stays inside 32 bits */
+#define JB_MIX(s) do { int32_t x; JB_GAIN(s); L[n] += (x * pl) >> 15; R[n] += (x * pr) >> 15; } while (0)
+    switch (v->type) {
+    case VT_KICK: {
+        v->inc[0] = JB_INC_48HZ + (uint32_t)(((JB_INC_75HZ >> 15) * v->pitch)); v->pitch = (v->pitch * JB_DEC_KICKP) >> 15;
+        uint32_t ph = v->ph[0]; const uint32_t inc = v->inc[0];
+        for (; n < OP1_FX_BLOCK; n++) { ph += inc; JB_MIX(op1_sin((int32_t)(ph >> 19))); }
+        v->ph[0] = ph;
+    } break;
+    case VT_SNARE: {
+        uint32_t ph = v->ph[0]; const uint32_t inc = v->inc[0]; const int32_t pa = v->pa[0];
+        int32_t hx = v->hx, hy = v->hy;
+        for (; n < OP1_FX_BLOCK; n++) {
+            ph += inc;
+            int32_t x = JB_NOISE();
+            hy = (JB_HP80 * (hy + x - hx)) >> 15; hx = x;
+            JB_MIX(((op1_sin((int32_t)(ph >> 19)) * pa) >> 16) + ((hy * 22938) >> 15));
         }
-        gacc += dg;
-        int32_t x = ((s >> 2) * (gacc >> 9)) >> 13;        /* |s| < 2^17, gain < 2^16: no 32-bit overflow */
-        if (x > 65535) x = 65535; else if (x < -65535) x = -65535;   /* x * pan stays inside 32 bits */
-        if (v->type == VT_GUITAR) Gb[n] += x;
-        else { L[n] += (x * v->pl) >> 15; R[n] += (x * v->pr) >> 15; }
+        v->ph[0] = ph; v->hx = hx; v->hy = hy;
+    } break;
+    case VT_RIDE: case VT_HAT: case VT_CRASH: {
+        const int ride = v->type == VT_RIDE;
+        const int32_t wm = ride ? 3277 : v->type == VT_HAT ? 3823 : 2731, wn = ride ? 8192 : v->type == VT_HAT ? 16384 : 22938;
+        uint32_t ph[7], inc[7];
+        for (int i = 0; i < 7; i++) { ph[i] = v->ph[i]; inc[i] = v->inc[i]; }
+        int32_t hx = v->hx, hy = v->hy, hx2 = v->hx2, hy2 = v->hy2;
+        for (; n < OP1_FX_BLOCK; n++) {
+            int32_t m = 0;
+            for (int i = 0; i < 6; i++) { ph[i] += inc[i]; m += (int32_t)ph[i] < 0 ? -1 : 1; }
+            int32_t x = m * wm + ((JB_NOISE() * wn) >> 15);
+            hy = (JB_HP82 * (hy + x - hx)) >> 15; hx = x;
+            hy2 = (JB_HP82 * (hy2 + hy - hx2)) >> 15; hx2 = hy;
+            int32_t s = hy2;
+            if (ride) { ph[6] += inc[6]; s += (op1_sin((int32_t)(ph[6] >> 19)) * 4588) >> 15; }
+            JB_MIX(s);
+        }
+        for (int i = 0; i < 7; i++) v->ph[i] = ph[i];
+        v->hx = hx; v->hy = hy; v->hx2 = hx2; v->hy2 = hy2;
+    } break;
+    case VT_STICK: {
+        int32_t hx = v->hx, hy = v->hy;
+        for (; n < OP1_FX_BLOCK; n++) { int32_t x = JB_NOISE(); hy = (JB_HP60 * (hy + x - hx)) >> 15; hx = x; JB_MIX(hy); }
+        v->hx = hx; v->hy = hy;
+    } break;
+    case VT_BASS: case VT_PIANO: {                                                /* 1 to 4 sine partials */
+        const int np = v->np;
+        uint32_t ph[4] = {0, 0, 0, 0}, inc[4] = {0, 0, 0, 0}; int32_t pa[4] = {0, 0, 0, 0};
+        for (int i = 0; i < np; i++) { ph[i] = v->ph[i]; inc[i] = v->inc[i]; pa[i] = v->pa[i]; }
+        for (; n < OP1_FX_BLOCK; n++) {
+            int32_t s = 0;
+            for (int i = 0; i < np; i++) { ph[i] += inc[i]; s += (op1_sin((int32_t)(ph[i] >> 19)) * pa[i]) >> 15; }
+            JB_MIX(s);
+        }
+        for (int i = 0; i < np; i++) v->ph[i] = ph[i];
+    } break;
+    case VT_EP: case VT_FMB: {                                                    /* 2-op FM, 1:1 */
+        uint32_t ph0 = v->ph[0], ph1 = v->ph[1]; const uint32_t inc0 = v->inc[0], inc1 = v->inc[1]; const int32_t pa = v->pa[0];
+        for (; n < OP1_FX_BLOCK; n++) {
+            ph0 += inc0; ph1 += inc1;
+            int32_t m = op1_sin((int32_t)(ph1 >> 19));
+            JB_MIX(op1_sin((int32_t)(ph0 >> 19) + ((m * pa) >> 15)));
+        }
+        v->ph[0] = ph0; v->ph[1] = ph1;
+    } break;
+    case VT_PK: {                                                                 /* pack: decode on the fly, linear interpolation */
+        const uint8_t *d = v->pk_d; const int mu = v->pk_codec;
+        const int32_t len = v->pk_len; const uint32_t inc = v->pk_inc;
+        int32_t pos = v->pk_pos, s0 = v->pk_s0, s1 = v->pk_s1, pred = v->pk_pred; uint32_t frac = v->pk_frac; int ix = v->pk_idx;
+        for (; n < OP1_FX_BLOCK; n++) {
+            if (pos > len) { v->active = 0; break; }
+            int32_t s = s0 + (((s1 - s0) * (int32_t)(frac >> 1)) >> 15);
+            frac += inc;
+            while (frac >= 65536) {
+                frac -= 65536; s0 = s1;
+                if (pos < len) {                                                  /* = pk_next(v) */
+                    int32_t i = pos++;
+                    s1 = mu ? PK_MULAW[d[i]] : (pred = pk_adpcm(pred, &ix, (d[i >> 1] >> ((i & 1) << 2)) & 15));
+                } else { s1 = 0; pos++; }
+            }
+            JB_MIX(s);
+        }
+        v->pk_pos = pos; v->pk_s0 = s0; v->pk_s1 = s1; v->pk_pred = pred; v->pk_frac = frac; v->pk_idx = (uint8_t)ix;
+    } break;
+    case VT_SMP: {
+        const int16_t *sd = v->sd; const int32_t send = v->send, sgain = v->sgain; const uint32_t sinc = v->sinc;
+        int32_t spos = v->spos; uint32_t sfrac = v->sfrac;
+        for (; n < OP1_FX_BLOCK; n++) {
+            if (spos >= send - 1) { v->active = 0; break; }
+            int32_t a = sd[spos], b = sd[spos + 1];
+            int32_t s = a + (((b - a) * (int32_t)(sfrac >> 1)) >> 15);
+            sfrac += sinc; spos += (int32_t)(sfrac >> 16); sfrac &= 0xFFFF;
+            int32_t left = send - spos;
+            if (left < 512) s = (s * left) >> 9;                                  /* fade at the end of the zone */
+            JB_MIX((s * sgain) >> 15);
+        }
+        v->spos = spos; v->sfrac = sfrac;
+    } break;
+    case VT_GUITAR: {                                                             /* Karplus-Strong, into the guitar bus */
+        int16_t *ks = v->ks; const int ksn = v->ksn; const int32_t fb = v->ksfb, apc = v->apc;
+        int p = v->kspos; int32_t apx = v->apx, apy = v->apy;
+        for (; n < OP1_FX_BLOCK; n++) {
+            int q = p + 1; if (q >= ksn) q = 0;
+            int32_t y = ks[p], avg = ((y + ks[q]) * fb) >> 16;
+            int32_t ap = ((apc * (avg - apy)) >> 15) + apx;
+            apx = avg; apy = ap;
+            ks[p] = op1_sat16(ap); p = q;
+            int32_t x; JB_GAIN(y); Gb[n] += x;
+        }
+        v->kspos = (int16_t)p; v->apx = apx; v->apy = apy;
+    } break;
     }
-done:
+#undef JB_NOISE
+#undef JB_GAIN
+#undef JB_MIX
+    e->nz = nz;
     if (v->type == VT_BASS || v->type == VT_PIANO) {
         for (int i = 0; i < v->np; i++) v->pa[i] = (v->pa[i] * v->pd[i]) >> 15;
         if (v->pa[0] < 4) v->active = 0;
@@ -2171,10 +2238,10 @@ static int setup_act(jb_t *e, int r) {                  /* white press on an act
     return 0;
 }
 static uint32_t scan_clock;
-static void band_block(int pos, const int16_t *p, int32_t *L, int32_t *R) {
+/* returns 0 when the band is silent this block (L / R not written: the caller leaves its input as it is) */
+static int band_block(int pos, const int16_t *p, int32_t *L, int32_t *R) {
     jb_t *e = &S[pos % 3];
     int32_t Gb[OP1_FX_BLOCK];
-    for (int n = 0; n < OP1_FX_BLOCK; n++) L[n] = R[n] = Gb[n] = 0;
 
     /* sampler slots: songbook in small steps; instruments one at a time, about 3 times a second each */
     ++scan_clock;
@@ -2317,12 +2384,19 @@ static void band_block(int pos, const int16_t *p, int32_t *L, int32_t *R) {
         e->acc += OP1_FX_BLOCK << 14;
         while (e->acc >= e->spt) { e->acc -= e->spt; do_tick(e, bpt_q8); }
     }
-    int any = 0;
-    for (int i = 0; i < JB_VOICES; i++) if (e->v[i].active) { render_voice(e, &e->v[i], L, R, Gb); any = 1; }
+    int any = 0, ks = 0;
+    for (int i = 0; i < JB_VOICES; i++) if (e->v[i].active) { any = 1; ks |= e->v[i].type == VT_GUITAR; }
     if (!any && e->state == ST_STOP) {   /* idle: no CPU, and no fixed-point residue left in the body filters */
         e->b1l = e->b1b = e->b2l = e->b2b = e->blp = 0;
-        return;
+        return 0;
     }
+    /* the guitar body below is fed only by the Karplus-Strong guitar (a pack guitar goes straight to L / R): with no
+     * such voice and the filters at rest it would add exact zeros, so it is skipped (always, with the packs) */
+    int body = ks || (e->b1l | e->b1b | e->b2l | e->b2b | e->blp);
+    for (int n = 0; n < OP1_FX_BLOCK; n++) L[n] = R[n] = 0;
+    if (body) for (int n = 0; n < OP1_FX_BLOCK; n++) Gb[n] = 0;
+    for (int i = 0; i < JB_VOICES; i++) if (e->v[i].active) render_voice(e, &e->v[i], L, R, Gb);
+    if (!body) return 1;
 
     /* guitar body: two resonances (state-variable band-passes, unity peak) and a 3.2 kHz roll-off, panned right */
     for (int n = 0; n < OP1_FX_BLOCK; n++) {
@@ -2337,6 +2411,7 @@ static void band_block(int pos, const int16_t *p, int32_t *L, int32_t *R) {
         e->blp += (JB_LP3200 * (o - e->blp)) >> 15;
         L[n] += (e->blp * 18022) >> 15; R[n] += (e->blp * 27525) >> 15;
     }
+    return 1;
 }
 
 static int32_t clampbus(int32_t x) { return x > 100000 ? 100000 : (x < -100000 ? -100000 : x); }
@@ -2348,29 +2423,33 @@ static int32_t softclip(int32_t u) {
     return u - ((u3 * 4855) >> 15);
 }
 
+/* The output stage adds the band to the input. Skipped when it would add exact zeros: the band is silent (idle), or its
+ * gain is 0 for the whole block (volume 0 or muted, and already ramped down), so the input passes as it is. */
 static void jb_render_stereo(int pos, int16_t *l, int16_t *r, const int16_t *p) {
     int32_t L[OP1_FX_BLOCK], R[OP1_FX_BLOCK];
-    band_block(pos, p, L, R);
+    int sound = band_block(pos, p, L, R);
     int32_t vol = S[pos % 3].s_muted ? 0 : op1_fx_param_q15(p, 1);
     int32_t from = S[pos % 3].band_gain;
+    S[pos % 3].band_gain = vol;
+    if (!sound || (!vol && !from)) return;
     for (int n = 0; n < OP1_FX_BLOCK; n++) {
         int32_t gain = from + ((vol - from) * (n + 1)) / OP1_FX_BLOCK;
         int32_t bl = softclip((clampbus(L[n]) * 19661) >> 15), br = softclip((clampbus(R[n]) * 19661) >> 15);
         l[n] = op1_sat16(l[n] + ((bl * gain) >> 15));
         r[n] = op1_sat16(r[n] + ((br * gain) >> 15));
     }
-    S[pos % 3].band_gain = vol;
 }
 static void jb_render(int pos, int16_t *buf, const int16_t *p) {     /* synth / drum FX slots: mono */
     int32_t L[OP1_FX_BLOCK], R[OP1_FX_BLOCK];
-    band_block(pos, p, L, R);
+    int sound = band_block(pos, p, L, R);
     int32_t vol = S[pos % 3].s_muted ? 0 : op1_fx_param_q15(p, 1);
     int32_t from = S[pos % 3].band_gain;
+    S[pos % 3].band_gain = vol;
+    if (!sound || (!vol && !from)) return;
     for (int n = 0; n < OP1_FX_BLOCK; n++) {
         int32_t gain = from + ((vol - from) * (n + 1)) / OP1_FX_BLOCK;
         buf[n] = op1_sat16(buf[n] + ((softclip((clampbus((L[n] + R[n]) >> 1) * 19661) >> 15) * gain) >> 15));
     }
-    S[pos % 3].band_gain = vol;
 }
 
 const op1_fx_t FX_jazzband = { jb_init, jb_render,
@@ -2542,8 +2621,8 @@ static void draw_songs(void *r, const jb_t *e) {
         int sel = i == row;
         if (sel) { arrow(r, OP1_Q10(12), y, C_WHITE); sq_line(r, OP1_Q10(24), y + OP1_Q10(13), OP1_Q10(308), y + OP1_Q10(13), OP1_Q10(1), C_GREY); }
         if (i < q) {                                     /* CANCEL QUEUE: the queued song */
-            const char *t, *c; int tl, key, minor, cl;
-            song_info(e->s_pend, &t, &tl, &key, &minor, &c, &cl);
+            const char *t; int tl, key, minor;
+            song_info(e->s_pend, &t, &tl, &key, &minor, 0, 0);
             int32_t x = jb_text(r, OP1_Q10(26), y, 1126, "CANCEL QUEUE: ", 1126, sel ? C_WHITE : C_RED);
             int fit = (OP1_Q10(306) - x) / (6 * 1126); if (tl > fit) tl = fit;
             jb_text_n(r, x, y, 1126, t, tl, 1126, sel ? C_WHITE : C_RED);
@@ -2562,16 +2641,16 @@ static void draw_songs(void *r, const jb_t *e) {
         const uint8_t *col = sel ? C_WHITE : now ? C_GREEN : queued ? C_RED : C_GREY;
         p = buf; p = sq_num(p, (uint32_t)(inset ? i - q : song + 1), 1);
         jb_text(r, OP1_Q10(26), y, 1126, buf, 1126, now ? C_GREEN : C_GREY);
-        const char *t, *c; int tl, key, minor, cl;
-        song_info(song, &t, &tl, &key, &minor, &c, &cl);
+        const char *t; int tl, key, minor;
+        song_info(song, &t, &tl, &key, &minor, 0, 0);
         int fit = (OP1_Q10(270) - OP1_Q10(56)) / (6 * 1229); if (tl > fit) tl = fit;
         jb_text_n(r, OP1_Q10(56), y, 1229, t, tl, 1229, col);
         if (now) rtext(r, OP1_Q10(306), y + OP1_Q10(2), 819, playing ? "PLAYS" : "LOADED", C_GREEN);
         else if (queued) rtext(r, OP1_Q10(306), y + OP1_Q10(2), 819, "NEXT", C_RED);
     }
     if (cur >= 0) {                                      /* the highlighted song's key and tempo */
-        const char *t, *c; int tl, key, minor, cl;
-        song_info(cur, &t, &tl, &key, &minor, &c, &cl);
+        const char *t; int tl, key, minor;
+        song_info(cur, &t, &tl, &key, &minor, 0, 0);
         p = buf; p = sq_cat(p, "KEY "); key_name(p, key, minor, 0); while (*p) p++;
         { int bpm = play_bpm(cur); if (bpm) { p = sq_cat(p, "   "); p = sq_num(p, (uint32_t)bpm, 1); p = sq_cat(p, " BPM"); } }
         jb_text(r, OP1_Q10(26), OP1_Q10(112), 1024, buf, 1024, C_GREY);
@@ -2627,8 +2706,8 @@ static void setup_value(const jb_t *e, int r, char *buf, const uint8_t **col, co
         break;
     }
     case R_RKEY: {
-        const char *t, *c; int tl, key, minor, cl;
-        song_info(e->s_song < nsongs() ? e->s_song : 0, &t, &tl, &key, &minor, &c, &cl);
+        const char *t; int tl, key, minor;
+        song_info(e->s_song < nsongs() ? e->s_song : 0, &t, &tl, &key, &minor, 0, 0);
         p = sq_cat(p, "TO "); key_name(p, key, minor, 0); while (*p) p++;
         p = sq_cat(p, "  NOW "); key_name(p, key, minor, e->s_transpose + e->s_shift);
         *col = wrapk(e->s_transpose + e->s_shift) ? C_WHITE : C_GREY; break;
@@ -2683,8 +2762,8 @@ static void draw_play(void *r, const jb_t *e) {
     if (e->nbars <= 0) return;
     if (bar >= e->nbars || bar < 0) bar = 0;
     char buf[64], *p;
-    const char *t, *c; int tl, key, minor, cl;
-    song_info(e->s_song < nsongs() ? e->s_song : 0, &t, &tl, &key, &minor, &c, &cl);
+    const char *t; int tl, key, minor;
+    song_info(e->s_song < nsongs() ? e->s_song : 0, &t, &tl, &key, &minor, 0, 0);
     int actual = wrapk(e->s_transpose + e->s_shift);
 
     /* top: number and title left; the actual key right (big), its offset smaller */
@@ -2779,8 +2858,8 @@ static void draw_play(void *r, const jb_t *e) {
     {
         p = buf; *p = 0; int any = 0;
         if (e->s_pend >= 0) {
-            const char *qt, *qc; int ql, qk, qm, qcl;
-            song_info(e->s_pend, &qt, &ql, &qk, &qm, &qc, &qcl);
+            const char *qt; int ql, qk, qm;
+            song_info(e->s_pend, &qt, &ql, &qk, &qm, 0, 0);
             p = sq_cat(p, "SONG: "); if (ql > 14) ql = 14; for (int i = 0; i < ql; i++) { char ch = qt[i]; *p++ = ch >= 'a' && ch <= 'z' ? (char)(ch - 32) : ch; } *p = 0;
             any = 1;
         } else if (e->jump >= 0 && state >= ST_COUNT) { p = sq_cat(p, "JUMP: BAR "); p = sq_num(p, (uint32_t)(e->jump + 1), 1); any = 1; }
