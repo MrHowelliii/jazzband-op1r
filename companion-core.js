@@ -153,7 +153,7 @@ var JazzCompanion = (() => {
       if (s.key !== undefined && (!Number.isInteger(s.key) || s.key < 0 || s.key > 11)) throw Error(`Song ${i + 1}: invalid key`);
       const practice = Number(s.practice);                 // practice tempo (optional): the OP-1 plays it, the original stays visible
       return { title: s.title.trim().slice(0, 200), chart: s.chart, composer: String(s.composer || '').slice(0, 200),
-        tempo, ...(Number.isFinite(practice) && practice >= 40 && practice <= 320 && Math.round(practice) !== Math.round(tempo) ? { practice: Math.round(practice) } : {}), style: s.style === 1 ? 1 : 0, ...(s.key === undefined ? {} : { key: s.key }), minor: !!s.minor,
+        tempo, ...(Number.isFinite(practice) && practice >= 40 && practice <= 320 && Math.round(practice) !== Math.round(tempo) ? { practice: Math.round(practice) } : {}), style: s.style === 2 ? 2 : s.style === 1 ? 1 : 0, ...(s.key === undefined ? {} : { key: s.key }), minor: !!s.minor,
         op1: s.op1 !== false, warnings: Array.isArray(s.warnings) ? s.warnings.map(String).slice(0, 100) : [] };
     });
   }
@@ -172,7 +172,8 @@ var JazzCompanion = (() => {
       return { songs, errors: [], playlist: '', sets: validateSets(Array.isArray(value) ? [] : value.sets, songs.length) };
     }
     const r = opd.parseIReal(source);
-    return { ...r, songs: validateSongs(r.songs.map(s => ({ ...s, style: s.ballad ? 1 : 0 })), parseChart) };
+    /* feel: ballad, else bossa nova for Brazilian and Latin styles (the plugin's straight-eighths feel), else swing */
+    return { ...r, songs: validateSongs(r.songs.map(s => ({ ...s, style: s.ballad ? 1 : /bossa|samba|latin|brazil/i.test(s.style || '') ? 2 : 0 })), parseChart) };
   }
   function mergeSongs(current, incoming) {
     const key = s => s.title.trim().toLowerCase() + '\0' + s.chart.replace(/\s+/g, ' ').trim();

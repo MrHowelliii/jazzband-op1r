@@ -26,6 +26,11 @@ the plugin built natively (`make test-web`).
 - **Practice / Arrange / Band** (SETUP): loop, from/to bar, key cycle, choruses; feel, intro, turnaround, ending;
   the four players with what each does, the mixer (level and mute per instrument), band volume and mute.
 - Settings stay with each song **on this device** (the OP-1 forgets them at restart); players and mixer are global.
+- **Sync with GitHub** (Songs tab): keep the library, set lists, per-song settings and the band in one file
+  (`jazzband-library.json`, the backup format plus song ids) in a private repository. Each device connects once with
+  the repository name and a fine-grained token limited to it (Contents: read and write); after that the page opens
+  with the library, pulls changes from other devices and saves every change a few seconds later. When two devices
+  changed it at once, all songs are kept and the device saving last keeps its set lists and settings.
 - **Sounds**: without packs the plugin's stand-in synths play. *Load sound packs…* (Band tab) takes the same
   `jbpiano`, `jbbass`, `jbguitar`, `jbdrums`, `jbnylon` .op1p files you install on the OP-1; they are kept in the
   browser. Served next to a `sound packs` folder holding them, the page loads them by itself.

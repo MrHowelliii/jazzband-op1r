@@ -361,6 +361,11 @@ try { const t = localStorage.getItem('jb.theme'); if (t === 'light' || t === 'da
   }
 
   /* ---------- songs ---------- */
+  .sync-card { margin-bottom:16px; }
+  .sync-card h2 { display:flex; align-items:center; gap:10px; font-size:18px; }
+  .sync-form { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; gap:10px; align-items:end; margin-top:12px; }
+  .sync-help { margin-top:6px; } .sync-help .steps { margin:4px 0 0; }
+  @media (max-width:760px) { .sync-form { grid-template-columns:1fr; } }
   .import-area { display:flex; align-items:center; gap:18px; border:1.5px dashed var(--line-strong); background:var(--surface); padding:20px 22px; border-radius:var(--radius); transition:background .15s, border-color .15s; }
   .import-symbol { width:44px; height:44px; background:var(--accent-soft); color:var(--accent); border-radius:12px; display:grid; place-items:center; font-size:26px; flex-shrink:0; }
   .import-area h2 { font-size:16px; font-weight:700; }
@@ -660,6 +665,21 @@ try { const t = localStorage.getItem('jb.theme'); if (t === 'light' || t === 'da
       <div><h1>Songs</h1><p>Import charts, choose what goes on the OP-1, and send it.</p></div>
       <button class="btn" id="libraryBackup">Back up library</button>
     </div>
+
+    <section class="card sync-card" id="syncCard" aria-label="Sync with GitHub">
+      <div class="pane-heading"><div><span class="eyebrow">Every device</span><h2>Sync with GitHub <span class="pill" id="syncPill">off</span></h2></div></div>
+      <p class="note" id="syncMsg">Keep your songs, set lists and practice settings in a private GitHub repository: each device opens with them, and every change is saved there.</p>
+      <div class="sync-form" id="syncForm">
+        <label class="field"><span class="label">Private repository</span><input id="syncRepo" placeholder="your-name/jazzband-library" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+        <label class="field"><span class="label">Access token</span><input id="syncToken" type="password" placeholder="github_pat_…" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+        <button class="btn primary" id="syncConnect">Connect</button>
+      </div>
+      <details class="sync-help" id="syncHelp"><summary>How to set it up</summary><ol class="steps">
+        <li>On github.com, create a <b>private</b> repository (for example <code>jazzband-library</code>).</li>
+        <li>Settings → Developer settings → Fine-grained tokens → <b>Generate new token</b>: <i>Only select repositories</i> → that repository; Permissions → Contents: <b>Read and write</b>.</li>
+        <li>Paste the repository (<code>owner/name</code>) and the token here, once on each device. The token stays on this device.</li></ol></details>
+      <div class="row-actions" id="syncActions" hidden><button class="btn" id="syncNow">Sync now</button><button class="text-btn" id="syncOff">Disconnect this device</button></div>
+    </section>
 
     <section class="import-area" id="importDrop" aria-label="Import song files">
       <span class="import-symbol" aria-hidden="true">＋</span>
@@ -1607,7 +1627,7 @@ function loadSongs() {
   try { const s = JSON.parse(localStorage.getItem('jb.songs')); if (Array.isArray(s) && s.length) return s; } catch (e) {}
   return DEFAULT_SONGS.map(s => ({ ...s }));
 }
-function saveSongs() { try { songs.forEach(songId); localStorage.setItem('jb.sets', JSON.stringify(sets)); localStorage.setItem('jb.songs', JSON.stringify(songs)); } catch (e) { $('irMsg').textContent = 'Browser storage unavailable. Back up your library before closing.'; } }
+function saveSongs() { try { songs.forEach(songId); localStorage.setItem('jb.sets', JSON.stringify(sets)); localStorage.setItem('jb.songs', JSON.stringify(songs)); } catch (e) { $('irMsg').textContent = 'Browser storage unavailable. Back up your library before closing.'; } if (typeof syncChanged === 'function') syncChanged(); }
 
 let songs = loadSongs();
 /* set lists: [{name, ids: [song id]}], organisation only; their songs are always in the OP-1 songbook */
@@ -1776,16 +1796,17 @@ function saveKeep(m) {                                    /* m.id: the songbook 
   for (const [k, a] of m.ss) { const s = songs[map[k]]; if (s) kept[songId(s)] = { ...(kept[songId(s)] || {}), ss: a }; }
   const t = new Map(m.tadj);
   map.forEach((li, k) => { const s = songs[li]; if (!s) return; const e = kept[songId(s)]; if (t.has(k)) kept[songId(s)] = { ...(e || {}), t: t.get(k) }; else if (e) delete e.t; });
-  store('jb.practice', kept);
+  store('jb.practice', kept); syncChanged();
 }
-function saveBand() { store('jb.band', { sty: st.sty, levels: st.levels, mutes: st.mutes, vol: st.vol }); }
-(function loadBand() {
+function saveBand() { store('jb.band', { sty: st.sty, levels: st.levels, mutes: st.mutes, vol: st.vol }); syncChanged(); }
+function loadBand() {
   const b = recall('jb.band', null); if (!b) return;
   if (Array.isArray(b.sty)) st.sty = b.sty.slice(0, 4).map((v, i) => Math.max(0, Math.min(ROSTER[i].length - 1, v | 0)));
   if (Array.isArray(b.levels)) st.levels = b.levels.slice(0, 4).map(v => Math.max(0, Math.min(100, +v || 0)));
   if (Array.isArray(b.mutes)) st.mutes = b.mutes.slice(0, 4).map(Boolean);
   if (b.vol >= 0 && b.vol <= 100) st.vol = +b.vol;
-})();
+}
+loadBand();
 
 /* ---------- sound: start on a tap (iOS needs it), keep going with the screen locked out ---------- */
 const PROC_SRC = `
@@ -2392,6 +2413,127 @@ $('midiClock').onchange = e => { st.clock = e.target.checked; };
 if (!navigator.requestMIDIAccess) $('midiCard').hidden = true;
 renderPlayers();
 
+/* ---------- sync: the library in a private GitHub repository (contents API, a fine-grained token on this device) ----------
+ * One JSON file in the jazzband-library format (Back up library writes the same), plus song ids, per-song practice
+ * settings and the band. The page opens from its local copy at once, then pulls; every change is pushed a few seconds
+ * later. When both sides changed, songs are merged (none is lost) and this device's set lists and settings win. */
+const sync = { cfg: recall('jb.sync', null), timer: 0, busy: false, applying: false, pulled: 0 };
+const SYNC_FILE = 'jazzband-library.json';
+function syncSave() { store('jb.sync', sync.cfg); }
+function syncStatus(text, state) {
+  $('syncMsg').textContent = text;
+  const pill = $('syncPill'); pill.textContent = state || (sync.cfg ? 'on' : 'off'); pill.classList.toggle('ok', !!sync.cfg && state !== 'error' && state !== 'offline');
+  $('syncForm').hidden = !!sync.cfg; $('syncActions').hidden = !sync.cfg; $('syncHelp').hidden = !!sync.cfg;
+}
+function gh(accept, opts = {}) {
+  return fetch(`https://api.github.com/repos/${sync.cfg.repo}/contents/${SYNC_FILE}`, { cache: 'no-store', ...opts,
+    headers: { Authorization: `Bearer ${sync.cfg.token}`, Accept: accept, 'X-GitHub-Api-Version': '2022-11-28', ...(opts.body ? { 'Content-Type': 'application/json' } : {}) } });
+}
+function libraryDoc() {
+  const ids = new Set(songs.map(songId)), practice = {}, kept = recall('jb.practice', {});
+  for (const id in kept) if (ids.has(id)) practice[id] = kept[id];
+  return { format: 'jazzband-library', version: 1, saved: new Date().toISOString(), songs: songs.map(s => ({ ...s })),
+    sets: sets.map(set => ({ name: set.name, songs: setSongs(set).map(s => songs.indexOf(s)) })), practice, band: recall('jb.band', null) };
+}
+function readDoc(text) {
+  const doc = JSON.parse(text);
+  if (!doc || doc.format !== 'jazzband-library' || doc.version !== 1) throw Error('the file is not a Jazz Band library');
+  const list = JazzCompanion.validateSongs(doc.songs, JB.parseChart).map((s, i) => ({ ...s, id: typeof doc.songs[i].id === 'string' ? doc.songs[i].id : undefined }));
+  list.forEach(songId);
+  const lists = (Array.isArray(doc.sets) ? doc.sets : []).slice(0, 16).filter(x => x && typeof x.name === 'string' && Array.isArray(x.songs))
+    .map(x => ({ name: x.name.slice(0, 60), ids: x.songs.filter(i => Number.isInteger(i) && list[i]).slice(0, 127).map(i => list[i].id) }));
+  return { songs: list, sets: lists, practice: doc.practice && typeof doc.practice === 'object' ? doc.practice : {}, band: doc.band };
+}
+function applyDoc(d, merge) {
+  const current = songs[st.idx] && songId(songs[st.idx]);
+  if (merge) {                                            /* both changed: every song from both, this device's sets win */
+    const key = s => songMatchKey(s), have = new Set(d.songs.map(key)), ids = new Set(d.songs.map(s => s.id));
+    for (const s of songs) if (!have.has(key(s)) && d.songs.length < 2000) { d.songs.push(ids.has(songId(s)) ? { ...s, id: undefined } : s); have.add(key(s)); }
+    d.songs.forEach(songId);
+    const byKey = new Map(d.songs.map(s => [key(s), s.id]));
+    d.sets = sets.map(set => ({ name: set.name, ids: setSongs(set).map(s => byKey.get(key(s))).filter(Boolean) }));
+    d.practice = { ...d.practice, ...recall('jb.practice', {}) };
+    d.band = recall('jb.band', null) || d.band;
+  }
+  sync.applying = true;
+  try {
+    songs = d.songs; sets = d.sets;
+    store('jb.practice', d.practice);
+    if (d.band && !merge) { store('jb.band', d.band); loadBand(); renderPlayers(); sendBandSettings(); }
+    saveSongs();
+    const i = songs.findIndex(s => s.id === current); st.idx = i >= 0 ? i : 0;
+    renderLib(); renderSets(); bandLibraryChanged();
+  } finally { sync.applying = false; }
+}
+function syncChanged() {
+  if (!sync.cfg || sync.applying) return;
+  sync.cfg.dirty = true; syncSave();
+  clearTimeout(sync.timer); sync.timer = setTimeout(() => syncRun(), 2500);
+  syncStatus('Saving changes…', 'saving');
+}
+function b64utf8(text) { const u = new TextEncoder().encode(text); let b = ''; for (let i = 0; i < u.length; i += 0x8000) b += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(b); }
+async function syncPush() {
+  const body = { message: `Jazz Band: ${songs.length} songs, ${sets.length} set lists`, content: b64utf8(JSON.stringify(libraryDoc())) };
+  if (sync.cfg.sha) body.sha = sync.cfg.sha;
+  const r = await gh('application/vnd.github+json', { method: 'PUT', body: JSON.stringify(body) });
+  if (r.status === 409 || r.status === 422) return false;  /* changed elsewhere since: pull, merge, push again */
+  if (!r.ok) throw Error(`saving failed (${r.status})`);
+  sync.cfg.sha = (await r.json()).content.sha; sync.cfg.dirty = false; syncSave();
+  return true;
+}
+async function syncRun(first) {
+  if (!sync.cfg) return;
+  if (sync.busy) { sync.again = true; return; }
+  sync.busy = true; clearTimeout(sync.timer);
+  try {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const meta = await gh('application/vnd.github.object+json');
+      if (meta.status === 401 || meta.status === 403) throw Error('the token was refused: check it can read and write this repository');
+      if (meta.status === 404) {                              /* no library file yet, or no repository at all? */
+        const repo = await fetch(`https://api.github.com/repos/${sync.cfg.repo}`, { cache: 'no-store', headers: { Authorization: `Bearer ${sync.cfg.token}` } });
+        if (!repo.ok) throw Error(`repository ${sync.cfg.repo} not found, or the token cannot see it`);
+      } else if (!meta.ok) throw Error(`reading failed (${meta.status})`);
+      const remote = meta.ok ? (await meta.json()).sha : null;
+      if (remote && remote !== sync.cfg.sha) {                /* changed on another device (or first connect) */
+        const raw = await gh('application/vnd.github.raw+json');
+        if (!raw.ok) throw Error(`reading failed (${raw.status})`);
+        const merge = !!sync.cfg.dirty || first;
+        applyDoc(readDoc(await raw.text()), merge);
+        sync.cfg.sha = remote; sync.cfg.dirty = merge; syncSave();
+      }
+      if (!remote) { sync.cfg.sha = null; sync.cfg.dirty = true; }
+      if (!sync.cfg.dirty || await syncPush()) break;
+      sync.cfg.sha = null;                                  /* conflict: read it again */
+    }
+    sync.pulled = Date.now();
+    syncStatus(`Synced with ${sync.cfg.repo} · ${songs.length} songs, ${sets.length} set lists · ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`);
+  } catch (err) {
+    const offline = err instanceof TypeError;
+    syncStatus(offline ? 'Offline: changes are kept here and saved when the connection is back.' : `Sync: ${err.message}`, offline ? 'offline' : 'error');
+  } finally {
+    sync.busy = false;
+    if (sync.again) { sync.again = false; syncRun(); }
+  }
+}
+$('syncConnect').onclick = async () => {
+  const repo = $('syncRepo').value.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$|\/$/g, ''), token = $('syncToken').value.trim();
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !token) { syncStatus('Enter the repository as owner/name, and the token.', 'error'); $('syncForm').hidden = false; return; }
+  sync.cfg = { repo, token, sha: null, dirty: false }; syncSave(); $('syncToken').value = '';
+  syncStatus('Connecting…', 'saving');
+  await syncRun(true);
+  if ($('syncPill').textContent === 'error') { sync.cfg = null; syncSave(); syncStatus($('syncMsg').textContent, 'error'); $('syncForm').hidden = false; $('syncRepo').value = repo; }
+};
+$('syncNow').onclick = () => syncRun();
+$('syncOff').onclick = () => { sync.cfg = null; store('jb.sync', null); syncStatus('Disconnected. This device keeps its copy of the library; the repository is unchanged.'); };
+document.addEventListener('visibilitychange', () => {
+  if (!sync.cfg) return;
+  if (document.visibilityState === 'hidden' && sync.cfg.dirty) syncRun();
+  else if (document.visibilityState === 'visible' && Date.now() - sync.pulled > 30000) syncRun();
+});
+window.addEventListener('online', () => { if (sync.cfg) syncRun(); });
+if (sync.cfg) { syncStatus(`Connected to ${sync.cfg.repo}. Checking for changes…`, 'saving'); setTimeout(() => syncRun(), 300); }
+else syncStatus($('syncMsg').textContent);
+
 /* ---------- OP-1 files ---------- */
 const NOTE_NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
 const noteName = (m) => NOTE_NAMES[((m % 12) + 12) % 12] + (Math.floor(m / 12) - 1);
@@ -2657,7 +2799,7 @@ function importText(source) {
   const merged = JazzCompanion.mergeSongs(songs, incoming);
   songs = merged.songs;
   const lists = (r.sets || []).slice();
-  if (r.playlist && incoming.length > 1) lists.push({name:r.playlist, songs:incoming.map((_, i) => i)});
+  if (r.playlist && incoming.length > 1 && incoming.length <= 127) lists.push({name:r.playlist, songs:incoming.map((_, i) => i)});   // a big playlist stays a library
   const made = importSets(lists, incoming);
   saveSongs(); buildUI(); selectSong(st.idx); libraryChanged();
   return `${merged.added} added, ${merged.duplicates} duplicates skipped${made.length ? `; set ${made.length === 1 ? 'list' : 'lists'} ${made.map(n => `“${n}”`).join(', ')} (its songs are now in the OP-1 songbook)` : ''}${r.errors.length ? '; import errors: ' + r.errors.join('; ') : ''}`;
