@@ -1,0 +1,55 @@
+# Publish the companion to GitHub Pages, with the sound packs built from their free sources (no audio in git).
+# Settings > Pages > Source: GitHub Actions. jbnylon needs the FreePats archive: set the repository variables
+# JB_NYLON_URL and JB_NYLON_SHA256 (Settings > Secrets and variables > Actions > Variables); without them it is skipped.
+name: Publish the companion
+on:
+  push:
+    branches: [main, claude/blissful-gates-5v51pd]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Packer dependencies (the versions that reproduce the 1.5 packs)
+        run: pip install numpy==2.5.3 scipy==1.18.1 soundfile==0.14.0
+      - uses: actions/cache@v4
+        with:
+          path: packs-src
+          key: packs-src-${{ hashFiles('jazzband-op1r/packs/fetch_sources.py') }}-${{ vars.JB_NYLON_SHA256 }}
+      - name: Build the sound packs
+        working-directory: jazzband-op1r
+        env:
+          JB_NYLON_URL: ${{ vars.JB_NYLON_URL }}
+          JB_NYLON_SHA256: ${{ vars.JB_NYLON_SHA256 }}
+        run: |
+          cc -O2 -shared -fPIC packs/adpcm.c -o packs/adpcm.so
+          PACKS="jbpiano jbbass jbguitar jbdrums"
+          if [ -n "$JB_NYLON_URL" ]; then PACKS="$PACKS jbnylon"; fi
+          python3 packs/fetch_sources.py ../packs-src $PACKS
+          python3 packs/make_packs.py ../packs-src plugins/jbpack/jbpack-template.op1p ../packs-out $PACKS
+      - name: Assemble the site (packs checked by SHA-256)
+        run: python3 jazzband-op1r/web/make_site.py packs-out site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

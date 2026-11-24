@@ -32,9 +32,15 @@ the plugin built natively (`make test-web`).
 - *Play along over MIDI* (Chrome / Edge) sends one part, and optionally clock, to the OP-1 as before.
 
 **On iPhone / iPad:** Safari needs the page from a web address (opening the .html from Files does not run it). The
-repository publishes itself with GitHub Pages (Settings → Pages → deploy from a branch, `/ (root)`):
-`https://mrhowelliii.github.io/jazzband-op1r/` (`index.html` opens `Jazz Band.html`). Sound packs are not in the
-repository, so load them once per device with *Load sound packs…*. Or put
+repository publishes itself with GitHub Pages (Settings → Pages → Source: *GitHub Actions*):
+`https://mrhowelliii.github.io/jazzband-op1r/` (`index.html` opens `Jazz Band.html`). The workflow
+(`.github/workflows/pages.yml`) builds the sound packs from their free sources (`packs/fetch_sources.py` fetches only
+the notes used, at pinned commits; `make_packs.py` builds), checks each against its SHA-256 (`web/make_site.py`) and
+puts them in the site's `sound packs` folder, where the page loads them by itself; no audio is stored in git.
+jbpiano, jbbass and jbdrums come out byte for byte the 1.5 release files. jbguitar is what the committed recipe makes
+(462,629 bytes; the 1.5 release file, 498,937 bytes, came from an earlier recipe that is not in the repository).
+jbnylon needs the FreePats archive: set the repository variables `JB_NYLON_URL` and `JB_NYLON_SHA256`; without it
+João Gilberto plays jbguitar. Or put
 `Jazz Band Companion.html` (and optionally the `sound packs` folder) on any static web host, or serve this folder
 from a Mac on the same Wi-Fi (`python3 -m http.server 8765`, then open `http://<mac-name>.local:8765/Jazz%20Band%20Companion.html`).
 Add it to the Home Screen for a full-screen app. Sound starts on the first tap; iOS 17 and later play with the

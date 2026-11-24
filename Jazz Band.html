@@ -608,7 +608,8 @@ try { const t = localStorage.getItem('jb.theme'); if (t === 'light' || t === 'da
             <div class="sounds">
               <div><b>Sounds</b> <span class="note" id="soundsMsg">Stand-in synths</span></div>
               <div class="pack-chips" id="packChips"></div>
-              <p class="note">Load Jazz Band's sound packs (<code>jbpiano</code>, <code>jbbass</code>, <code>jbguitar</code>, <code>jbdrums</code>, <code>jbnylon</code> .op1p files) once for the recorded instruments. They are kept on this device.</p>
+              <p class="note">Where the site has them, the sound packs load by themselves. Otherwise load Jazz Band's sound packs (<code>jbpiano</code>, <code>jbbass</code>, <code>jbguitar</code>, <code>jbdrums</code>, <code>jbnylon</code> .op1p files) once; they are kept on this device.</p>
+              <p class="note">Samples: Salamander Grand Piano by Alexander Holm (CC-BY 3.0); Meatbass and Shinyguitar by Karoryfer Samples, Virtuosity Drums by Versilian Studios, Spanish Classical Guitar by FreePats (CC0).</p>
               <div class="row-actions"><button class="btn" id="packLoad">Load sound packs…</button><button class="text-btn" id="packForget" hidden>Forget</button></div>
               <input type="file" id="packFiles" multiple hidden>
             </div>
@@ -2126,10 +2127,11 @@ function sendPack(name, bytes) {
 }
 function packLoaded(m) { if (m.inst < 0 && m.name) toast(`${m.name}: not a Jazz Band sound pack, or damaged`); band.packSig = ''; if (band.mode === 'page') pullLocal(); }
 async function loadStoredPacks() {
-  const stored = await packAll();
-  for (const [name, bytes] of stored) sendPack(name, new Uint8Array(bytes));
-  if (stored.length || location.protocol === 'file:') return;
-  for (const name of PACK_NAMES) {                         /* served next to the release's "sound packs" folder */
+  const stored = await packAll(), have = new Set();
+  for (const [name, bytes] of stored) if (sendPack(name, new Uint8Array(bytes))) have.add(String(name).toLowerCase());
+  if (location.protocol === 'file:') return;
+  for (const name of PACK_NAMES) {                         /* the site's "sound packs" folder (GitHub Pages builds them) */
+    if (have.has(name)) continue;
     try { const r = await fetch(`sound packs/${name}.op1p`); if (r.ok) sendPack(name, new Uint8Array(await r.arrayBuffer())); } catch (e) {}
   }
 }
