@@ -1,0 +1,4 @@
+AUTUMN LEAVES;7;1;0;*A C-7 | F7 | Bb^7 | Eb^7 | Ah7 | D7b9 | G-6 | G-6 | *B Ah7 | D7b9 | G-6 | G-6 | C-7 | F7 | Bb^7 | Eb^7 |;140
+WALTZ;5;0;0;T34 *A F^7 | G-7 C7 | A-7 D7 | G-7 C7 | *B F^7 | Bb7 | A-7 D7b9 | G-7 C7 |;180;160
+BLUES;5;0;1;*A F7 | Bb7 | F7 | C-7 F7 | Bb7 | Bo7 | F7 | D7b9 | G-7 | C7 | F7 D7b9 | G-7 C7 |;100
+@GIG|2 0

@@ -218,7 +218,7 @@ accompanies (rhythm placement, density, register, voicings), not a transcription
 
 SETUP BAND shows each player and what it does. (1.5: players 6–12 are in the 1.5 section above; the SOUND rows are gone.)
 
-The Mac companion's play-along preview still plays the original band only.
+The companion's Play tab runs this plugin compiled to WebAssembly (`web/`, `make web`), so it plays every player.
 
 Tests: `make test-all` (plugin, players, songbook and browser, companion). `make test-styles` writes demo WAVs:
 `out/styles_1.wav` … `styles_5.wav` (all four instruments on player 1 … 5, swing, 160 BPM) and `*_ballad.wav` (72 BPM).
@@ -300,6 +300,10 @@ op1r-src (`synth_sdk/plugins/jazzband/`, with the WAV and screen preview).
 - `gen_tables.py`: regenerates `jb_tables.h` (all pitch and decay constants, precomputed)
 - `test/host_test.c`, `mock/`: host test harness (`gcc -Imock -Iplugins/jazzband test/host_test.c -lm`)
 - `render_frames.py`: draws the logged screen frames to PNG
+- `web/`: the browser build for the companion: `op1_plugin.h` (a freestanding stand-in for the SDK header),
+  `jb_wasm.c` (includes `jazzband.c` unchanged; the songbook and packs arrive through `op1_fxs[]` as on the OP-1, and
+  touch controls call the knob handlers' own functions), `jbw-glue.js` (AudioWorklet / fallback glue), `bundle.py`.
+  `make web` writes `../jazzband-web.js`; `make test-web` checks it against the same session built natively
 
 License: GPL-3.0-or-later with the OP-1 firmware permission, like op1r. Songs are chord changes only.
 

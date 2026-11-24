@@ -6,6 +6,40 @@ folder access depend on browser support and permission. If those are unavailable
 opening a local file, serve this folder with `python3 -m http.server 8765 --bind 127.0.0.1`
 and open `http://127.0.0.1:8765/Jazz%20Band%20Companion.html`.
 
+## Play along: the plugin itself, in any browser (iPhone and iPad too)
+
+The **Play** tab now runs the Jazz Band plugin's own C code, compiled to WebAssembly (`jazzband-web.js`, built from
+`jazzband-op1r/web/`), so the browser band is the OP-1 band: all 42 players, swing / ballad / bossa nova, loops
+(sections or bars), key cycles, choruses, intros, turnarounds, endings, and the same bar-line rules for key, song and
+jump changes. The old preview (the 0.5 band only) is gone. A scripted session renders sample-for-sample the same as
+the plugin built natively (`make test-web`).
+
+- **Transport** (red on the OP-1): Play, then Finish (the ending after this chorus or loop pass), then Stop. The
+  square button stops at once. Space / Esc on a keyboard.
+- **Key** and **tempo** steppers (blue and red): stopped, at once; playing, a key change waits for the next bar line
+  (Cancel in the notice). Tap the key for all 12 keys, tap the tempo for a slider, tap tempo, the songbook tempo,
+  and *Keep as practice tempo* (saved with the song and sent to the OP-1 with the songbook). Hold − / + to repeat.
+- **Song** (SONGS): tap the title. Set lists are chips; stopped, a song loads; playing, it waits for the bar line.
+  In a set list, *Up next* queues the next song.
+- **Chart**: tap a bar for *Play from here* / *Start here next time* (stopped), *Jump here* (playing, at the next bar
+  line), *Loop from / to here*, *Loop section*.
+- **Practice / Arrange / Band** (SETUP): loop, from/to bar, key cycle, choruses; feel, intro, turnaround, ending;
+  the four players with what each does, the mixer (level and mute per instrument), band volume and mute.
+- Settings stay with each song **on this device** (the OP-1 forgets them at restart); players and mixer are global.
+- **Sounds**: without packs the plugin's stand-in synths play. *Load sound packs…* (Band tab) takes the same
+  `jbpiano`, `jbbass`, `jbguitar`, `jbdrums`, `jbnylon` .op1p files you install on the OP-1; they are kept in the
+  browser. Served next to a `sound packs` folder holding them, the page loads them by itself.
+- *Play along over MIDI* (Chrome / Edge) sends one part, and optionally clock, to the OP-1 as before.
+
+**On iPhone / iPad:** Safari needs the page from a web address (opening the .html from Files does not run it). Put
+`Jazz Band Companion.html` (and optionally the `sound packs` folder) on any static web host, or serve this folder
+from a Mac on the same Wi-Fi (`python3 -m http.server 8765`, then open `http://<mac-name>.local:8765/Jazz%20Band%20Companion.html`).
+Add it to the Home Screen for a full-screen app. Sound starts on the first tap; iOS 17 and later play with the
+ringer switch on silent (earlier iOS: a silent media clip is used for the same), and the screen stays on while the
+band plays (iOS 16.4+). Over plain `http://` from another computer Safari has no AudioWorklet, so the band runs on the
+page instead (same sound, slightly more latency). Lockdown Mode disables WebAssembly, and with it the band.
+Sending songs and installing plugins still needs Chrome or Edge on a computer (Web MIDI).
+
 ## Plugin 1.5: 42 players, bossa nova, samples only
 
 SETUP BAND has 12 drummers (new: Tony Williams, Roy Haynes, Billy Higgins, Jo Jones, Jack DeJohnette, Max Roach,
@@ -24,8 +58,8 @@ actions, red = tempo), **SONGS** (set lists and songs: browse with white, push w
 **SETUP** (practice, arrangement, band and song settings: white picks a row, red changes it). Green is volume and
 mute everywhere; a red press is play / finish / stop everywhere. Shift + the knobs is the band mixer.
 
-Players are chosen in SETUP BAND. Settings made on the OP-1 last until it restarts. The companion's practice
-preview continues to use its original band. Full details: `jazzband-op1r/README.md`.
+Players are chosen in SETUP BAND. Settings made on the OP-1 last until it restarts. The companion's Play tab
+runs the same plugin code (see above). Full details: `jazzband-op1r/README.md`.
 
 ## Add and transfer songs
 
@@ -125,8 +159,10 @@ updated plugin to get this fix; merely replacing the HTML cannot patch installed
 
 ## Build and verify
 
-`Jazz Band.html` is the editable source and loads `companion-core.js` from this folder.
-Run `python3 build_companion.py` after source edits to regenerate the standalone bundle.
+`Jazz Band.html` is the editable source and loads `companion-core.js` and `jazzband-web.js` from this folder.
+`jazzband-web.js` is generated (and committed, so the page runs from a checkout): after changing the plugin or
+`jazzband-op1r/web/`, run `make web` in `jazzband-op1r` (needs clang with the wasm32 target and wasm-ld). Run
+`python3 build_companion.py` after source edits to regenerate the standalone bundle.
 
 ```sh
 node tests/companion.test.cjs
@@ -134,7 +170,13 @@ node tests/workspace.test.cjs
 cd jazzband-op1r
 make test
 make test-songbook
+make test-web        # the WebAssembly band against the same session built natively, plus the page's glue
 ```
+
+`make test-web` builds the native side with clang on purpose: in the bossa piano part one call draws two random
+numbers inside its argument list (`piano_hit(..., 5 + irand(e, 4), VLO[st] - 4 + irand(e, 12))`), and C leaves the
+order open, so GCC and Clang draw them the other way round. Musically equivalent, but not bit-identical between a
+GCC build (the OP-1's toolchain) and the browser.
 
 Tests cover library validation and merging, iReal link parsing, AIFF PCM preservation,
 SysEx packet encoding/CRC, plugin validation, staged upload with mocked ports (including a
@@ -156,7 +198,8 @@ alternatives, capacity validation, pending-save status, and a separate practice
 view. Optional plugin and sample controls remain under expandable sections.
 
 Frontend source is `Jazz Band.html`; regenerate `Jazz Band Companion.html` with
-`python3 build_companion.py`. Keep changes to the importer, AIFF encoder, MIDI
+`python3 build_companion.py`. The Play tab talks to the band only through `jazzband-op1r/web/jbw-glue.js` (calls named
+after the OP-1's knob actions, and a state snapshot about 60 times a second, shown when its sound is heard). Keep changes to the importer, AIFF encoder, MIDI
 protocol and firmware separate from UI work. The rebuild did not change
 `companion-core.js` or the C plugin. UI interaction checks are in
 `tests/workspace.test.cjs`; they use actual handlers with a minimal DOM and never
