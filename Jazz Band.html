@@ -281,6 +281,9 @@ try { const t = localStorage.getItem('jb.theme'); if (t === 'light' || t === 'da
   .sheet-actions .btn { width:100%; min-height:52px; justify-content:flex-start; font-size:16px; }
   .sheet-actions .btn small { margin-left:auto; color:var(--dim); font-weight:500; font-size:13px; }
   .sheet-sub { color:var(--dim); font-size:14px; margin-bottom:14px; }
+  .pick-q { margin-bottom:10px; font-size:17px; min-height:48px; }
+  .sheet.tall .sheet-card { height:min(760px, 86vh); }
+  .sheet.tall { align-items:flex-start; padding-top:max(24px, env(safe-area-inset-top)); }
   .chips { display:flex; gap:6px; overflow-x:auto; padding-bottom:6px; margin-bottom:8px; -webkit-overflow-scrolling:touch; scrollbar-width:none; }
   .chip { flex-shrink:0; border:1px solid var(--line); background:var(--surface-2); color:var(--dim); border-radius:99px; min-height:36px; padding:0 14px; font-weight:650; font-size:14px; cursor:pointer; }
   .chip[aria-pressed=true] { background:var(--text); color:var(--bg); border-color:var(--text); }
@@ -344,6 +347,8 @@ try { const t = localStorage.getItem('jb.theme'); if (t === 'light' || t === 'da
     .editor .ed-fields { grid-template-columns:1fr 1fr; }
     .editor .ed-fields .field:first-child { grid-column:1/-1; }
     .sheet { align-items:flex-end; padding:0; }
+    .sheet.tall { align-items:flex-start; padding-top:max(12px, env(safe-area-inset-top)); }
+    .sheet.tall .sheet-card { height:calc(100% - max(12px, env(safe-area-inset-top))); max-height:none; border-radius:20px; }
     .sheet-card { width:100%; max-height:88vh; border-radius:20px 20px 0 0; padding-bottom:env(safe-area-inset-bottom); }
     .up-next { padding:6px 10px; font-size:13px; }
   }
@@ -2185,11 +2190,11 @@ function openSheet(title, html, bind) {
   if (bind) bind($('sheetBody'));
   const f = $('sheetBody').querySelector('[autofocus], button, select, input'); if (f && !IOS) f.focus();
 }
-function closeSheet() { $('sheet').hidden = true; $('sheetBody').innerHTML = ''; if (band.sheetFocus && band.sheetFocus.focus) band.sheetFocus.focus(); }
+function closeSheet() { $('sheet').hidden = true; $('sheet').classList.remove('tall'); $('sheetBody').innerHTML = ''; if (band.sheetFocus && band.sheetFocus.focus) band.sheetFocus.focus(); }
 $('sheet').addEventListener('click', e => { if (e.target.closest('[data-close]')) closeSheet(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('sheet').hidden) { e.stopPropagation(); closeSheet(); } }, true);
 
-function songMeta(s) { const k = songKey(s); return [NOTE[k.key] + (k.minor ? 'm' : ''), (s.practice || s.tempo) + ' BPM', feelOf(s) ? FEELS[feelOf(s)] : ''].filter(Boolean).join(' · '); }
+function songMeta(s) { const k = songKey(s); return [s.composer, NOTE[k.key] + (k.minor ? 'm' : ''), (s.practice || s.tempo) + ' BPM', feelOf(s) ? FEELS[feelOf(s)] : ''].filter(Boolean).join(' · '); }
 function openSongPicker() {
   const draw = body => {
     const set = sets[st.set], list = set ? setSongs(set) : songs, q = (band.pickQ || '').toLowerCase().trim(), words = q.split(/\s+/).filter(Boolean);
@@ -2208,10 +2213,16 @@ function openSongPicker() {
     const qi = body.querySelector('.pick-q'); if (qi) qi.placeholder = set ? `Search ${set.name}` : `Search ${songs.length.toLocaleString()} songs`;
     body.querySelector('.sheet-sub').textContent = playing ? 'The band is playing: the song you pick starts at the next bar line.' : 'Pick a song, then press Play.';
   };
-  openSheet('Songs', `<p class="sheet-sub"></p><div class="chips" role="group" aria-label="Set lists"></div>
-    ${songs.length > 8 ? '<input type="search" class="pick-q" placeholder="Search songs" aria-label="Search songs">' : ''}<div class="pick-list"></div>`, body => {
+  openSheet('Songs', `${songs.length > 8 ? '<input type="search" class="pick-q" placeholder="Search songs" aria-label="Search songs" enterkeyhint="search" autocomplete="off" autocorrect="off" spellcheck="false">' : ''}
+    <div class="chips" role="group" aria-label="Set lists"></div><p class="sheet-sub"></p><div class="pick-list"></div>`, body => {
     draw(body);
-    const qi = body.querySelector('.pick-q'); if (qi) { qi.value = band.pickQ || ''; qi.oninput = () => { band.pickQ = qi.value; draw(body); }; }
+    $('sheet').classList.add('tall');                    /* room for results above the keyboard */
+    const qi = body.querySelector('.pick-q');
+    if (qi) {
+      qi.value = band.pickQ || ''; qi.oninput = () => { band.pickQ = qi.value; draw(body); };
+      qi.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); const first = body.querySelector('[data-song]'); if (first) first.click(); else qi.blur(); } };
+      if (st.set < 0 && songs.length > SEARCH_FIRST) { qi.focus(); qi.select(); }   /* in the tap: iOS opens the keyboard */
+    }
     body.onclick = e => {
       const c = e.target.closest('[data-set]'); if (c) { st.set = +c.dataset.set; draw(body); renderSongBar(); return; }
       const p = e.target.closest('[data-song]'); if (p) { closeSheet(); chooseSong(+p.dataset.song); }
