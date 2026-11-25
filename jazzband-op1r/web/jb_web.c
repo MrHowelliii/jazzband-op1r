@@ -6,16 +6,19 @@
  * The page (an AudioWorklet) calls jbw_render() for 128 frames at a time at 44.1 kHz and reads two float buffers.
  * Songs come in as bars of per-beat chords (jbw_load) and a melody (jbw_lead_*). The OP-1 screen and knobs are not
  * used: the page sets the engine's fields (tempo, feel, players, loops, choruses...) directly. */
+#define JB_WEB 1
 #define JB_MAXBARS 512
 #define JB_TICK_HOOK(e, bpt) web_tick((void *)(e), (bpt))
+#define JB_TRIGGER_HOOK(e, ev, bpt) web_trigger((void *)(e), (const void *)(ev), (bpt))
 static void web_tick(void *ev, int bpt_q8);
+static void web_trigger(void *e, const void *ev, int bpt_q8);
 #include "../plugins/jazzband/jazzband.c"
 
 int host_lines_n;
 #define EXPORT(name) __attribute__((export_name(#name)))
 
 /* ------------------------------------------------------------------ memory for the sound packs (bump allocator) */
-static uint8_t ARENA[3800 * 1024] __attribute__((aligned(16)));
+static uint8_t ARENA[44u << 20] __attribute__((aligned(16)));
 static uint32_t arena_used;
 EXPORT(jbw_alloc) uint8_t *jbw_alloc(uint32_t n) {
     n = (n + 15) & ~15u;
@@ -134,7 +137,12 @@ static lnote_t LN[LEAD_MAX];
 static int lead_n, lead_first[JB_MAXBARS + 1];
 static lnote_t PICK[32]; static int pick_n;             /* the pickup: t from the start of the count-in bar */
 static uint32_t lead_mask = 0xFFFFFFFFu;                /* bit c-1: the lead plays in chorus c (beyond 32: bit 31) */
-static int lead_sound, lead_level = 26000, lead_oct;    /* sound: 0 synth (horn), 1 piano pack, 2 guitar pack, 3 vibes */
+static int lead_sound, lead_level = 26000, lead_oct;    /* sound: 0 synth (horn), 1 piano pack, 2 guitar pack, 3 vibes, 4 the lead pack (sax) */
+static int human = 60;                                  /* 0 = exactly on the grid .. 100 = loose */
+static uint32_t hrng = 0x1234567u;
+static int hrand(int n) { hrng = hrng * 1664525u + 1013904223u; return n > 0 ? (int)((hrng >> 10) % (uint32_t)n) : 0; }
+static int htri(int n) { return hrand(n + 1) + hrand(n + 1) - n; }      /* -n..n, mostly near 0 */
+EXPORT(jbw_human) void jbw_human(int amount) { human = amount < 0 ? 0 : amount > 100 ? 100 : amount; }
 EXPORT(jbw_lead_buf) lnote_t *jbw_lead_buf(void) { return LN; }
 EXPORT(jbw_pick_buf) lnote_t *jbw_pick_buf(void) { return PICK; }
 EXPORT(jbw_lead_max) int jbw_lead_max(void) { return LEAD_MAX; }
@@ -145,9 +153,40 @@ EXPORT(jbw_lead_set) void jbw_lead_set(int n, int npick) {
     for (int b = 0; b <= JB_MAXBARS; b++) { while (k < lead_n && LN[k].bar < b) k++; lead_first[b] = k; }
 }
 EXPORT(jbw_lead_mask) void jbw_lead_mask(uint32_t m) { lead_mask = m; }
-EXPORT(jbw_lead_sound) void jbw_lead_sound(int s, int level, int oct) { lead_sound = s & 3; lead_level = level; lead_oct = oct; }
+EXPORT(jbw_lead_sound) void jbw_lead_sound(int s, int level, int oct) { lead_sound = s < 0 || s > 4 ? 0 : s; lead_level = level; lead_oct = oct; }
+
+/* A player's touch for the band. Each instrument sits in its own place around the beat (the ride and the bass on
+ * top of it, the piano and the guitar a little behind), moves a few milliseconds from note to note, and never hits
+ * two notes equally hard. A voice can only start later than its tick, so "ahead" means "delayed the least". */
+static void web_trigger(void *e_, const void *ev_, int bpt_q8) {
+    jb_t *e = (jb_t *)e_; const ev_t *ev = (const ev_t *)ev_;
+    if (!human) { trigger(e, ev, bpt_q8); return; }
+    static const int16_t BASE[4] = {0, 110, 380, 230}, VAR[4] = {70, 170, 330, 170}, VELJ[4] = {7, 6, 8, 6};   /* samples at 44.1 kHz */
+    static int last_tick = -1, last_bar = -1, off[4];
+    if (e->tick != last_tick || e->bar != last_bar) {       /* one placement per instrument per tick: chords stay together */
+        last_tick = e->tick; last_bar = e->bar;
+        for (int i = 0; i < 4; i++) off[i] = (BASE[i] + hrand(VAR[i])) * human / 60;
+    }
+    ev_t x = *ev;
+    int inst = x.inst > 3 ? 3 : x.inst;
+    int v = x.vel + htri(VELJ[inst]) * human / 60;
+    x.vel = (uint8_t)(v < 12 ? 12 : v > 127 ? 127 : v);
+    uint8_t a0[JB_VOICES]; int32_t g0[JB_VOICES]; const uint8_t *d0[JB_VOICES];
+    for (int i = 0; i < JB_VOICES; i++) { a0[i] = e->v[i].active; g0[i] = e->v[i].g; d0[i] = e->v[i].pk_d; }
+    trigger(e, &x, bpt_q8);
+    int d = off[inst];
+    if (inst == I_DRUMS) d = x.note == D_RIDE ? 0 : hrand(60) * human / 60;        /* the ride leads the band */
+    if (inst == I_PIANO) d += hrand(90) * human / 60;                              /* fingers do not land as one */
+    for (int i = 0; i < JB_VOICES; i++) {
+        voice_t *vv = &e->v[i];
+        if (vv->active && (!a0[i] || vv->g != g0[i] || vv->pk_d != d0[i])) vv->wait += d;
+    }
+}
 
 /* synth lead voices: float, mono, panned slightly left */
+#ifndef LEAD_PK_G
+#define LEAD_PK_G 1600                                  /* a sustained note sits a little under the synth lead (web/test) */
+#endif
 typedef struct {
     int on, wait, len, age, rel;                          /* samples: before start, gate, since start; releasing */
     float f, ph, ph2, env, lp, bp, vel, vib, glide;
@@ -187,6 +226,31 @@ static void lead_note_on(jb_t *e, int note, int vel, int wait, int len_samples, 
         e->strum_n = sn; e->lvl[li] = keep;
         (void)len_samples;
         return;
+    }
+    if (lead_sound == 4) {                                 /* the recorded lead instrument */
+        static voice_t *prev; static const uint8_t *prev_d;
+        int vel2 = vel + htri(6) * human / 60; if (vel2 < 20) vel2 = 20; if (vel2 > 127) vel2 = 127;
+        const jbzone_t *pz = pk_zone(PK_LEAD, note, vel2);
+        if (pz) {
+            if (prev && prev->active && prev->type == VT_PK && prev->pk_d == prev_d) { prev->len = 0; prev->rel = 29500; }   /* one line: the last note lets go */
+            voice_t *pv = alloc_voice(e, JB_GTRV, JB_VOICES);
+            for (int i = 0; i < 7; i++) { pv->ph[i] = 0; pv->inc[i] = 0; }
+            for (int i = 0; i < 4; i++) { pv->pa[i] = 0; pv->pd[i] = 32767; }
+            pv->hx = pv->hy = pv->hx2 = pv->hy2 = 0; pv->np = 0; pv->pitch = 0;
+            pv->active = 1; pv->dec = 32767; pv->rel = 30600; pv->pl = 24300; pv->pr = 22000;
+            int d = note - pz->key; if (d < -48) d = -48; if (d > 48) d = 48;
+            const jbpack_t *pk = PKS.ok[PK_LEAD];
+            pv->type = VT_PK; pv->pk_d = pk_data(pk) + pz->off; pv->pk_len = (int32_t)pz->len; pv->pk_pos = 0;
+            pv->pk_codec = pz->codec; pv->pk_pred = pz->pred; pv->pk_idx = pz->idx;
+            pv->pk_inc = ((JB_RATIO[d + 48] >> 2) * (pz->step >> 2)) >> 12;
+            pv->pk_s0 = pk_next(pv); pv->pk_s1 = pk_next(pv); pv->pk_frac = 0;
+            int dyn = 40 + ((vel2 * 88) >> 7);
+            pv->g = mul30(dyn * G(LEAD_PK_G), (lead_level * 40960) >> 15); pv->gprev = 0;
+            pv->len = len_samples / OP1_FX_BLOCK; if (pv->len < 6) pv->len = 6;
+            pv->wait = wait + (150 + hrand(260)) * human / 60;        /* a horn lays back */
+            prev = pv; prev_d = pv->pk_d;
+            return;
+        }
     }
     static int rr;
     lvoice_t *v = &LV[0];                                  /* horn: monophonic, the newest note takes the voice (legato) */

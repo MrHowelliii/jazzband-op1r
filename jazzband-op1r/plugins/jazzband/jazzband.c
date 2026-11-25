@@ -276,7 +276,18 @@ static int op1_fx_count;
 #define JBP_MAGIC1 0x31444E53u
 #define JBP_MAXZ   160
 #define PK_NYLON   4                   /* 1.5: jbnylon, a nylon-string guitar for Joao Gilberto (pack inst 4) */
+#ifdef JB_WEB                          /* web build: one more pack (the lead instrument), 16-bit PCM zones, big packs */
+#define PK_LEAD    5
+#define PK_N       6
+#define PK_MAXDATA (64u << 20)
+#define PK_BUDGET  65536u
+#define PK_CODECS  2
+#else
 #define PK_N       5
+#define PK_MAXDATA (4u << 20)
+#define PK_BUDGET  4096u
+#define PK_CODECS  1
+#endif
 static const uint8_t JBP_PRESS[4] = { 0xCA, 0xC2, 0xD0, 0xCB };
 typedef struct { uint8_t key, vlo, vhi, rr; uint32_t step; int16_t pred; uint8_t idx, codec; uint32_t off, len; } jbzone_t;
 typedef struct {
@@ -290,11 +301,11 @@ static struct {
 } PKS;
 static const uint8_t *pk_data(const jbpack_t *p) { return (const uint8_t *)p + p->data_off; }
 static int pk_valid(const jbpack_t *p) {                 /* header and zone bounds (before the checksum) */
-    if (p->inst >= PK_N || p->nzones < 1 || p->nzones > JBP_MAXZ || p->data_len == 0 || p->data_len > (4u << 20)) return 0;
+    if (p->inst >= PK_N || p->nzones < 1 || p->nzones > JBP_MAXZ || p->data_len == 0 || p->data_len > PK_MAXDATA) return 0;
     for (uint32_t i = 0; i < p->nzones; i++) {
         const jbzone_t *z = &p->zone[i];
-        uint32_t bytes = z->codec ? z->len : (z->len + 1) >> 1;
-        if (z->len < 2 || z->codec > 1 || z->idx > 88 || z->step == 0 || z->step > (4u << 16) || z->vlo > z->vhi ||
+        uint32_t bytes = z->codec == 2 ? z->len * 2 : z->codec ? z->len : (z->len + 1) >> 1;
+        if (z->len < 2 || z->codec > PK_CODECS || z->idx > 88 || z->step == 0 || z->step > (4u << 16) || z->vlo > z->vhi ||
             z->off > p->data_len || bytes > p->data_len - z->off) return 0;
     }
     return 1;
@@ -311,7 +322,7 @@ static void pk_scan(void) {                             /* audio thread, every b
         }
         PKS.state = 1; PKS.cur = -1;
     }
-    for (uint32_t budget = 4096; budget;) {
+    for (uint32_t budget = PK_BUDGET; budget;) {
         if (PKS.cur < 0 || PKS.pos >= PKS.total) {
             if (PKS.cur >= 0) { const jbpack_t *b = PKS.found[PKS.cur]; if (PKS.c == b->sum) PKS.ok[PKS.cur] = b; }
             do PKS.cur++; while (PKS.cur < PK_N && !PKS.found[PKS.cur]);
@@ -375,6 +386,9 @@ static const int16_t PK_MULAW[256] = {
     120, 112, 104, 96, 88, 80, 72, 64, 56, 48, 40, 32, 24, 16, 8, 0};
 static int32_t pk_next(voice_t *v) {
     int32_t i = v->pk_pos++;
+#ifdef JB_WEB
+    if (v->pk_codec == 2) return (int16_t)(v->pk_d[2 * i] | v->pk_d[2 * i + 1] << 8);   /* 16-bit PCM, little endian */
+#endif
     if (v->pk_codec) return PK_MULAW[v->pk_d[i]];
     int nib = (v->pk_d[i >> 1] >> ((i & 1) << 2)) & 15, step = PK_STEP[v->pk_idx], diff = step >> 3;
     if (nib & 4) diff += step;
@@ -1971,7 +1985,11 @@ static void do_tick(jb_t *e, int32_t blocks_per_tick_q8) {
     if (e->tick == 0) gen_bar(e);
     e->strum_n = 0;
     if (e->tick % JB_TPB == 0) { e->s_beat = e->tick / JB_TPB; e->s_bar = e->bar; e->s_state = e->state; }
+#ifdef JB_TRIGGER_HOOK                                  /* web build: a player's touch (timing, dynamics) per note */
+    for (int i = 0; i < e->nev; i++) if (e->ev[i].tick == e->tick) JB_TRIGGER_HOOK(e, &e->ev[i], blocks_per_tick_q8);
+#else
     for (int i = 0; i < e->nev; i++) if (e->ev[i].tick == e->tick) trigger(e, &e->ev[i], blocks_per_tick_q8);
+#endif
 #ifdef JB_TICK_HOOK
     JB_TICK_HOOK(e, blocks_per_tick_q8);                 /* web build: the lead line plays on the band's own ticks */
 #endif

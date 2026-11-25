@@ -12,7 +12,7 @@ check(WebAssembly.Module.imports(mod).length === 0, `no imports (${WebAssembly.M
 const { exports: X } = await WebAssembly.instantiate(mod, {});
 const mem = () => new Uint8Array(X.memory.buffer);
 X.jbw_init();
-for (const p of ['jbdrums', 'jbbass', 'jbpiano', 'jbguitar']) {
+for (const p of ['jbdrums', 'jbbass', 'jbpiano', 'jbguitar', 'jblead']) {
   const f = path.join(web, 'packs', p + '.jbp');
   if (!fs.existsSync(f)) { console.log('skip  ' + p + ' (not built)'); continue; }
   const b = fs.readFileSync(f); const ptr = X.jbw_alloc(b.length);
@@ -31,8 +31,8 @@ for (let b = 0; b < 8; b++) { const o = LN + 8 * b; dv().setUint16(o, b, true); 
 X.jbw_lead_set(8, 0);
 X.jbw_lead_sound(0, 30000, 0);
 // let the pack checksums run (they are checked 4 KB a block)
-for (let i = 0; i < 1500; i++) X.jbw_render();
-for (const [i, n] of ['drums', 'bass', 'piano', 'guitar'].entries()) check(X.jbw_pack_ok(i) === 1, `${n} pack verified`);
+for (let i = 0; i < 2500; i++) X.jbw_render();
+for (const [i, n] of [[0, 'drums'], [1, 'bass'], [2, 'piano'], [3, 'guitar'], [5, 'lead (sax)']]) check(X.jbw_pack_ok(i) === 1, `${n} pack verified`);
 X.jbw_play(-1);
 const sr = 44100, secs = 20, L = new Float32Array(128 * Math.floor(sr * secs / 128)), R = new Float32Array(L.length);
 const bars_seen = []; let last = -1;
@@ -49,17 +49,25 @@ const lens = bars_seen.slice(1).map((x, i) => x[1] - bars_seen[i][1]);
 const want = sr * 4 * 60 / 120;
 check(lens.length >= 7 && lens.every(l => Math.abs(l - want) <= 128), `bars last 2 s at 120 BPM (${lens.slice(0, 6).join(', ')} samples)`);
 check(bars_seen.length && bars_seen[0][0] === 0, 'starts at bar 1 after the count-in');
-// pitch of the lead: render it alone (band muted) and autocorrelate
+// the lead alone (band muted): pitch and level of each lead sound
 for (let i = 0; i < 4; i++) X.jbw_level(i, 1);
-X.jbw_stop(); for (let i = 0; i < 400; i++) X.jbw_render();
-X.jbw_play(-1);
-const buf = new Float32Array(128 * Math.floor(sr * 4 / 128));
-for (let i = 0; i < buf.length / 128; i++) { X.jbw_render(); buf.set(new Float32Array(X.memory.buffer, X.jbw_out_l(), 128), i * 128); }
-const seg = buf.subarray(sr * 2.5, sr * 3.0);   // inside bar 1 (count-in 2 s)
-let best = 0, bl = 0;
-for (let lag = 40; lag < 400; lag++) { let s = 0; for (let i = 0; i < seg.length - lag; i++) s += seg[i] * seg[i + lag]; if (s > best) { best = s; bl = lag; } }
-const f0 = sr / bl;
-check(Math.abs(f0 - 440) < 8, `lead plays A4 in tune (${f0.toFixed(1)} Hz)`);
+const alone = (sound) => {
+  X.jbw_stop(); X.jbw_lead_sound(sound, 30000, 0); for (let i = 0; i < 600; i++) X.jbw_render();
+  X.jbw_play(-1);
+  const buf = new Float32Array(128 * Math.floor(sr * 4 / 128));
+  for (let i = 0; i < buf.length / 128; i++) { X.jbw_render(); buf.set(new Float32Array(X.memory.buffer, X.jbw_out_l(), 128), i * 128); }
+  const seg = buf.subarray(sr * 2.5, sr * 3.0);   // inside bar 1 (count-in 2 s)
+  let best = 0, bl = 0, e2 = 0;
+  for (let lag = 40; lag < 400; lag++) { let s = 0; for (let i = 0; i < seg.length - lag; i++) s += seg[i] * seg[i + lag]; if (s > best) { best = s; bl = lag; } }
+  for (const v of seg) e2 += v * v;
+  return [sr / bl, Math.sqrt(e2 / seg.length)];
+};
+const [f0, r0] = alone(0), [f4, r4] = alone(4), [, r1] = alone(1);
+check(Math.abs(f0 - 440) < 8, `synth lead plays A4 in tune (${f0.toFixed(1)} Hz)`);
+check(Math.abs(f4 - 440) < 8, `sax lead plays A4 in tune (${f4.toFixed(1)} Hz)`);
+check(r4 > r0 * 0.4 && r4 < r0 * 1.0, `sax lead sits a little under the synth lead (rms ${r4.toFixed(3)} vs ${r0.toFixed(3)}; piano, decaying, ${r1.toFixed(3)})`);
+// a player's touch moves notes by milliseconds, never the bar lines; off = the old exact playback
+X.jbw_stop(); X.jbw_human(0);
 // write a demo
 const wav = (Lc, Rc, file) => {
   const n = Lc.length, b = Buffer.alloc(44 + n * 4);
