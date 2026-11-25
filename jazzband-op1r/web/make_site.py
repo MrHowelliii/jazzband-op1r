@@ -11,7 +11,7 @@ then plays the stand-in synth for it) and reported, so a changed toolchain never
 import hashlib, json, os, shutil, sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-PAGE = ['index.html', '.nojekyll', 'Jazz Band.html', 'companion-core.js', 'jazzband-web.js']
+PAGE = ['index.html', '.nojekyll', 'Jazz Band.html', 'companion-core.js', 'jazzband-web.js', 'vendor/qrcode.js', 'songs/jazz-1460.json']
 RECIPE = {'jbguitar.op1p': '56a6e2b0275260a33bf153ba0b2dc089ffe07d04d681554c3dd502a61fde917a'}
 
 packs, site = sys.argv[1], sys.argv[2]
@@ -19,7 +19,8 @@ want = {os.path.basename(a['path']): a['sha256'] for a in json.load(open(os.path
         if a['path'].startswith('sound packs/')}
 want.update(RECIPE)
 os.makedirs(os.path.join(site, 'sound packs'), exist_ok=True)
-for f in PAGE: shutil.copy(os.path.join(ROOT, f), os.path.join(site, f))
+for f in PAGE:
+    os.makedirs(os.path.dirname(os.path.join(site, f)), exist_ok=True); shutil.copy(os.path.join(ROOT, f), os.path.join(site, f))
 shutil.copy(os.path.join(ROOT, 'sound packs', 'CREDITS.md'), os.path.join(site, 'sound packs', 'CREDITS.md'))
 published, skipped = [], []
 for name in sorted(want):

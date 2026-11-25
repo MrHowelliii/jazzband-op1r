@@ -365,6 +365,9 @@ try { const t = localStorage.getItem('jb.theme'); if (t === 'light' || t === 'da
   .sync-card h2 { display:flex; align-items:center; gap:10px; font-size:18px; }
   .sync-form { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; gap:10px; align-items:end; margin-top:12px; }
   .sync-help { margin-top:6px; } .sync-help .steps { margin:4px 0 0; }
+  .qr { display:block; width:min(260px, 70vw); margin:6px auto 14px; background:#fff; padding:12px; border-radius:14px; }
+  .qr svg { display:block; width:100%; height:auto; }
+  .setup-link { font:12px/1.4 var(--mono); word-break:break-all; background:var(--surface-2); border-radius:10px; padding:10px 12px; color:var(--dim); max-height:4.4em; overflow:hidden; }
   @media (max-width:760px) { .sync-form { grid-template-columns:1fr; } }
   .import-area { display:flex; align-items:center; gap:18px; border:1.5px dashed var(--line-strong); background:var(--surface); padding:20px 22px; border-radius:var(--radius); transition:background .15s, border-color .15s; }
   .import-symbol { width:44px; height:44px; background:var(--accent-soft); color:var(--accent); border-radius:12px; display:grid; place-items:center; font-size:26px; flex-shrink:0; }
@@ -670,7 +673,7 @@ try { const t = localStorage.getItem('jb.theme'); if (t === 'light' || t === 'da
       <div class="pane-heading"><div><span class="eyebrow">Every device</span><h2>Sync with GitHub <span class="pill" id="syncPill">off</span></h2></div></div>
       <p class="note" id="syncMsg">Keep your songs, set lists and practice settings in a private GitHub repository: each device opens with them, and every change is saved there.</p>
       <div class="sync-form" id="syncForm">
-        <label class="field"><span class="label">Private repository</span><input id="syncRepo" placeholder="owner/repository" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+        <label class="field"><span class="label">Private repository, or a setup link</span><input id="syncRepo" placeholder="owner/repository" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
         <label class="field"><span class="label">Access token</span><input id="syncToken" type="password" placeholder="github_pat_…" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
         <button class="btn primary" id="syncConnect">Connect</button>
       </div>
@@ -678,7 +681,7 @@ try { const t = localStorage.getItem('jb.theme'); if (t === 'light' || t === 'da
         <li>On github.com, create a <b>private</b> repository (for example <code>jazzband-library</code>).</li>
         <li>Settings → Developer settings → Fine-grained tokens → <b>Generate new token</b>: <i>Only select repositories</i> → that repository; Permissions → Contents: <b>Read and write</b>.</li>
         <li>Paste the repository (<code>owner/name</code>) and the token here, once on each device. The token stays on this device.</li></ol></details>
-      <div class="row-actions" id="syncActions" hidden><button class="btn" id="syncNow">Sync now</button><button class="text-btn" id="syncOff">Disconnect this device</button></div>
+      <div class="row-actions" id="syncActions" hidden><button class="btn primary" id="syncShare">Add another device</button><button class="btn" id="syncNow">Sync now</button><button class="text-btn" id="syncOff">Disconnect this device</button></div>
     </section>
 
     <section class="import-area" id="importDrop" aria-label="Import song files">
@@ -1606,6 +1609,7 @@ var OPD = (function () {
 if (typeof module !== 'undefined') module.exports = OPD;
 </script>
 <script src="jazzband-web.js"></script>
+<script src="vendor/qrcode.js"></script>
 <script src="companion-core.js"></script>
 <script>
 const ENGINE_SRC = document.getElementById('engine-src').textContent;
@@ -2444,22 +2448,27 @@ function readDoc(text) {
     .map(x => ({ name: x.name.slice(0, 60), ids: x.songs.filter(i => Number.isInteger(i) && list[i]).slice(0, 127).map(i => list[i].id) }));
   return { songs: list, sets: lists, practice: doc.practice && typeof doc.practice === 'object' ? doc.practice : {}, band: doc.band };
 }
-function applyDoc(d, merge) {
+function applyDoc(d, merge, first) {
   const current = songs[st.idx] && songId(songs[st.idx]);
-  if (merge) {                                            /* both changed: every song from both, this device's sets win */
+  if (merge) {                                            /* both changed: every song and set list from both sides; on a
+                                                           * first connect the repository wins where both have one, after
+                                                           * an edit on two devices at once this device does */
     const key = s => songMatchKey(s), have = new Set(d.songs.map(key)), ids = new Set(d.songs.map(s => s.id));
     for (const s of songs) if (!have.has(key(s)) && d.songs.length < 2000) { d.songs.push(ids.has(songId(s)) ? { ...s, id: undefined } : s); have.add(key(s)); }
     d.songs.forEach(songId);
     const byKey = new Map(d.songs.map(s => [key(s), s.id]));
-    d.sets = sets.map(set => ({ name: set.name, ids: setSongs(set).map(s => byKey.get(key(s))).filter(Boolean) }));
-    d.practice = { ...d.practice, ...recall('jb.practice', {}) };
-    d.band = recall('jb.band', null) || d.band;
+    const mine = sets.map(set => ({ name: set.name, ids: setSongs(set).map(s => byKey.get(key(s))).filter(Boolean) }));
+    const named = new Map(d.sets.map(x => [x.name, x]));
+    for (const x of mine) if (!named.has(x.name) || !first) named.set(x.name, x);
+    d.sets = [...named.values()].slice(0, 16);
+    d.practice = first ? { ...recall('jb.practice', {}), ...d.practice } : { ...d.practice, ...recall('jb.practice', {}) };
+    d.band = first ? d.band || recall('jb.band', null) : recall('jb.band', null) || d.band;
   }
   sync.applying = true;
   try {
     songs = d.songs; sets = d.sets;
     store('jb.practice', d.practice);
-    if (d.band && !merge) { store('jb.band', d.band); loadBand(); renderPlayers(); sendBandSettings(); }
+    if (d.band && (!merge || first)) { store('jb.band', d.band); loadBand(); renderPlayers(); sendBandSettings(); }
     saveSongs();
     const i = songs.findIndex(s => s.id === current); st.idx = i >= 0 ? i : 0;
     renderLib(); renderSets(); bandLibraryChanged();
@@ -2497,8 +2506,8 @@ async function syncRun(first) {
       if (remote && remote !== sync.cfg.sha) {                /* changed on another device (or first connect) */
         const raw = await gh('application/vnd.github.raw+json');
         if (!raw.ok) throw Error(`reading failed (${raw.status})`);
-        const merge = !!sync.cfg.dirty || first;
-        applyDoc(readDoc(await raw.text()), merge);
+        const merge = !!sync.cfg.dirty || !!first;
+        applyDoc(readDoc(await raw.text()), merge, !!first);
         sync.cfg.sha = remote; sync.cfg.dirty = merge; syncSave();
       }
       if (!remote) { sync.cfg.sha = null; sync.cfg.dirty = true; }
@@ -2515,16 +2524,48 @@ async function syncRun(first) {
     if (sync.again) { sync.again = false; syncRun(); }
   }
 }
+/* setup links: the repository and token in the link's #fragment (never sent to a server), for your own devices */
+const b64url = t => b64utf8(t).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+function setupLink() {
+  return location.origin + location.pathname.replace(/[^/]*$/, '') + '#sync=' + b64url(JSON.stringify({ r: sync.cfg.repo, t: sync.cfg.token }));
+}
+function readSetupLink(text) {
+  const m = /#sync=([\w-]+)/.exec(text || ''); if (!m) return null;
+  try {
+    const b = atob(m[1].replace(/-/g, '+').replace(/_/g, '/')), v = JSON.parse(new TextDecoder().decode(Uint8Array.from(b, c => c.charCodeAt(0))));
+    return typeof v.r === 'string' && typeof v.t === 'string' ? { repo: v.r, token: v.t } : null;
+  } catch (e) { return null; }
+}
+async function connectSync(repo, token) {
+  sync.cfg = { repo, token, sha: null, dirty: false }; syncSave(); $('syncToken').value = '';
+  syncStatus('Connecting…', 'saving');
+  await syncRun(true);
+  if ($('syncPill').textContent === 'error') { const msg = $('syncMsg').textContent; sync.cfg = null; syncSave(); syncStatus(msg, 'error'); $('syncRepo').value = repo; return false; }
+  return true;
+}
+$('syncShare').onclick = () => {
+  const link = setupLink(); let qr = '';
+  try { const q = qrcode(0, 'L'); q.addData(link); q.make(); qr = q.createSvgTag({ cellSize: 4, margin: 2, scalable: true }); } catch (e) {}
+  openSheet('Add another device', `${qr ? `<div class="qr" aria-label="QR code of the setup link">${qr}</div>` : ''}
+    <p class="sheet-sub">Scan this with the other device's camera, or send it the link (AirDrop, Messages, Notes). It opens Jazz Band already connected: your songs, set lists and settings.</p>
+    <div class="setup-link">${escapeHTML(link)}</div>
+    <div class="row-actions" style="margin-top:12px">${navigator.share ? '<button class="btn primary" id="linkShare">Share link…</button>' : ''}<button class="btn" id="linkCopy">Copy link</button></div>
+    <p class="note" style="margin-top:12px">On the other device: if you use Jazz Band from its Home Screen icon, open the app, go to Songs, paste the link into the repository box and tap Connect.</p>
+    <p class="note warn" style="margin-top:8px">The link holds your access token: send it only to your own devices.</p>`, body => {
+    const copy = body.querySelector('#linkCopy'), share = body.querySelector('#linkShare');
+    copy.onclick = async () => { try { await navigator.clipboard.writeText(link); copy.textContent = 'Copied'; } catch (e) { toast('Copy failed: press and hold the link to copy it'); } };
+    if (share) share.onclick = () => navigator.share({ title: 'Jazz Band setup', url: link }).catch(() => {});
+  });
+};
 $('syncConnect').onclick = async () => {
+  const fromLink = readSetupLink($('syncRepo').value);
+  if (fromLink) { if (await connectSync(fromLink.repo, fromLink.token)) { $('syncRepo').value = ''; toast(`Connected to ${fromLink.repo}`); } return; }
   const repo = $('syncRepo').value.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$|\/$/g, ''), token = $('syncToken').value.trim();
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !token) {
     syncStatus(!repo ? 'Type the repository, for example MrHowelliii/jazzband-library (the grey text is only an example).' : !token ? 'Paste the access token.' : 'Type the repository as owner/name, for example MrHowelliii/jazzband-library.', 'error');
     $('syncForm').hidden = false; $(!/^[\w.-]+\/[\w.-]+$/.test(repo) ? 'syncRepo' : 'syncToken').focus(); return;
   }
-  sync.cfg = { repo, token, sha: null, dirty: false }; syncSave(); $('syncToken').value = '';
-  syncStatus('Connecting…', 'saving');
-  await syncRun(true);
-  if ($('syncPill').textContent === 'error') { sync.cfg = null; syncSave(); syncStatus($('syncMsg').textContent, 'error'); $('syncForm').hidden = false; $('syncRepo').value = repo; }
+  await connectSync(repo, token);
 };
 $('syncNow').onclick = () => syncRun();
 $('syncOff').onclick = () => { sync.cfg = null; store('jb.sync', null); syncStatus('Disconnected. This device keeps its copy of the library; the repository is unchanged.'); };
@@ -2534,8 +2575,31 @@ document.addEventListener('visibilitychange', () => {
   else if (document.visibilityState === 'visible' && Date.now() - sync.pulled > 30000) syncRun();
 });
 window.addEventListener('online', () => { if (sync.cfg) syncRun(); });
-if (sync.cfg) { syncStatus(`Connected to ${sync.cfg.repo}. Checking for changes…`, 'saving'); setTimeout(() => syncRun(), 300); }
-else syncStatus($('syncMsg').textContent);
+{ /* opened from a setup link: connect, and take the token out of the address bar */
+  const link = readSetupLink(location.hash);
+  if (link) {
+    history.replaceState(null, '', location.pathname + location.search);
+    setTimeout(async () => { showView('library'); if (await connectSync(link.repo, link.token)) toast(`Connected to ${link.repo}: your library is here`); }, 300);
+  } else if (sync.cfg) { syncStatus(`Connected to ${sync.cfg.repo}. Checking for changes…`, 'saving'); setTimeout(() => syncRun(), 300); }
+  else syncStatus($('syncMsg').textContent);
+}
+
+/* built-in songs: the Jazz 1460 playlist (songs/jazz-1460.json, served with the site), added once to each device's
+ * library as library songs (not in the OP-1 songbook). A synced library already has them: nothing changes there. */
+async function addBuiltinSongs() {
+  if (recall('jb.builtin', 0) >= 1 || location.protocol === 'file:') return;
+  try {
+    const r = await fetch('songs/jazz-1460.json'); if (!r.ok) return;
+    const doc = await r.json();
+    const list = JazzCompanion.validateSongs(doc.songs, JB.parseChart).map((x, i) => ({ ...x, id: typeof doc.songs[i].id === 'string' ? doc.songs[i].id : undefined, op1: false }));
+    const merged = JazzCompanion.mergeSongs(songs, list);
+    store('jb.builtin', 1);
+    if (!merged.added) return;
+    songs = merged.songs; saveSongs(); renderLib(); renderSets(); bandLibraryChanged();
+    toast(`${merged.added.toLocaleString()} songs from the Jazz 1460 playlist are in your library`);
+  } catch (e) { console.warn('built-in songs:', e); }
+}
+setTimeout(addBuiltinSongs, 1200);
 
 /* ---------- OP-1 files ---------- */
 const NOTE_NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];

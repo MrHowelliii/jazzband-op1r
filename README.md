@@ -30,7 +30,13 @@ the plugin built natively (`make test-web`).
   (`jazzband-library.json`, the backup format plus song ids) in a private repository. Each device connects once with
   the repository name and a fine-grained token limited to it (Contents: read and write); after that the page opens
   with the library, pulls changes from other devices and saves every change a few seconds later. When two devices
-  changed it at once, all songs are kept and the device saving last keeps its set lists and settings.
+  changed it at once, all songs and set lists are kept (on a first connect the repository's version of a set list
+  wins; after simultaneous edits, the device saving last). **Add another device** shows a QR code and a setup link
+  (the repository and token in the link's `#fragment`, which never reaches a server): open it on the other device, or
+  paste it into the repository box there, and it is connected.
+- **Built-in songs**: the iReal Pro forum's *Jazz 1460* playlist (`songs/jazz-1460.json`, imported with the
+  companion's own importer) is added once to every device's library when the page is served (GitHub Pages), as
+  library songs (not in the OP-1 songbook). `vendor/qrcode.js` is Kazuhiko Arase's QR Code Generator (MIT).
 - **Sounds**: without packs the plugin's stand-in synths play. *Load sound packs…* (Band tab) takes the same
   `jbpiano`, `jbbass`, `jbguitar`, `jbdrums`, `jbnylon` .op1p files you install on the OP-1; they are kept in the
   browser. Served next to a `sound packs` folder holding them, the page loads them by itself.

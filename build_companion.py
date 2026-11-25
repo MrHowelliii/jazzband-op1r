@@ -4,7 +4,7 @@ from pathlib import Path
 
 base = Path(__file__).resolve().parent
 output = source = (base / 'Jazz Band.html').read_text()
-for name in ('companion-core.js', 'jazzband-web.js'):
+for name in ('companion-core.js', 'jazzband-web.js', 'vendor/qrcode.js'):
     code = (base / name).read_text()
     assert '</script' not in code.lower(), name
     tag = f'<script src="{name}"></script>'
