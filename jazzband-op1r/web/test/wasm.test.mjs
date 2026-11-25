@@ -1,0 +1,75 @@
+// Node test for web/jazzband.wasm: no imports, packs load and verify, a song with a lead line renders in time and in tune.
+import fs from 'node:fs';
+import path from 'node:path';
+const here = path.dirname(new URL(import.meta.url).pathname);
+const web = path.join(here, '..');
+let fails = 0;
+const check = (ok, msg) => { console.log((ok ? 'ok:   ' : 'FAIL: ') + msg); if (!ok) fails++; };
+
+const bytes = fs.readFileSync(path.join(web, 'jazzband.wasm'));
+const mod = await WebAssembly.compile(bytes);
+check(WebAssembly.Module.imports(mod).length === 0, `no imports (${WebAssembly.Module.imports(mod).map(i => i.name)})`);
+const { exports: X } = await WebAssembly.instantiate(mod, {});
+const mem = () => new Uint8Array(X.memory.buffer);
+X.jbw_init();
+for (const p of ['jbdrums', 'jbbass', 'jbpiano', 'jbguitar']) {
+  const f = path.join(web, 'packs', p + '.jbp');
+  if (!fs.existsSync(f)) { console.log('skip  ' + p + ' (not built)'); continue; }
+  const b = fs.readFileSync(f); const ptr = X.jbw_alloc(b.length);
+  check(ptr !== 0, `${p}: ${b.length} bytes fit the arena`);
+  mem().set(b, ptr); X.jbw_add_pack(ptr);
+}
+// Autumn Leaves, A section, per-beat chords (root, quality) Q: 0 maj7 1 m7 2 7 3 h7 4 o7 5 m6 6 6 7 7b9
+const chart = [[0, 1], [5, 2], [10, 0], [3, 0], [9, 3], [2, 7], [7, 5], [7, 5]];
+const bars = X.jbw_bars();
+chart.forEach(([r, q], b) => { for (let k = 0; k < 4; k++) { mem()[bars + 9 * b + 2 * k] = r; mem()[bars + 9 * b + 2 * k + 1] = q; } mem()[bars + 9 * b + 8] = b === 0 ? 65 : 0; });
+X.jbw_load(8, 4, 120, 0);
+// lead: a whole note A4 (69) in every bar, so its pitch can be measured
+const LN = X.jbw_lead_buf();
+const dv = () => new DataView(X.memory.buffer);
+for (let b = 0; b < 8; b++) { const o = LN + 8 * b; dv().setUint16(o, b, true); dv().setUint16(o + 2, 0, true); dv().setUint16(o + 4, 180, true); mem()[o + 6] = 69; mem()[o + 7] = 100; }
+X.jbw_lead_set(8, 0);
+X.jbw_lead_sound(0, 30000, 0);
+// let the pack checksums run (they are checked 4 KB a block)
+for (let i = 0; i < 1500; i++) X.jbw_render();
+for (const [i, n] of ['drums', 'bass', 'piano', 'guitar'].entries()) check(X.jbw_pack_ok(i) === 1, `${n} pack verified`);
+X.jbw_play(-1);
+const sr = 44100, secs = 20, L = new Float32Array(128 * Math.floor(sr * secs / 128)), R = new Float32Array(L.length);
+const bars_seen = []; let last = -1;
+for (let i = 0; i < L.length / 128; i++) {
+  X.jbw_render();
+  L.set(new Float32Array(X.memory.buffer, X.jbw_out_l(), 128), i * 128);
+  R.set(new Float32Array(X.memory.buffer, X.jbw_out_r(), 128), i * 128);
+  const st = X.jbw_state(), b = X.jbw_bar();
+  if ((st & 15) === 3 && b !== last) { bars_seen.push([b, i * 128]); last = b; }
+}
+let pk = 0, e = 0; for (let i = 0; i < L.length; i++) { pk = Math.max(pk, Math.abs(L[i]), Math.abs(R[i])); e += L[i] * L[i]; }
+check(pk > 0.05 && pk <= 1, `audible, no overflow (peak ${pk.toFixed(3)}, rms ${Math.sqrt(e / L.length).toFixed(3)})`);
+const lens = bars_seen.slice(1).map((x, i) => x[1] - bars_seen[i][1]);
+const want = sr * 4 * 60 / 120;
+check(lens.length >= 7 && lens.every(l => Math.abs(l - want) <= 128), `bars last 2 s at 120 BPM (${lens.slice(0, 6).join(', ')} samples)`);
+check(bars_seen.length && bars_seen[0][0] === 0, 'starts at bar 1 after the count-in');
+// pitch of the lead: render it alone (band muted) and autocorrelate
+for (let i = 0; i < 4; i++) X.jbw_level(i, 1);
+X.jbw_stop(); for (let i = 0; i < 400; i++) X.jbw_render();
+X.jbw_play(-1);
+const buf = new Float32Array(128 * Math.floor(sr * 4 / 128));
+for (let i = 0; i < buf.length / 128; i++) { X.jbw_render(); buf.set(new Float32Array(X.memory.buffer, X.jbw_out_l(), 128), i * 128); }
+const seg = buf.subarray(sr * 2.5, sr * 3.0);   // inside bar 1 (count-in 2 s)
+let best = 0, bl = 0;
+for (let lag = 40; lag < 400; lag++) { let s = 0; for (let i = 0; i < seg.length - lag; i++) s += seg[i] * seg[i + lag]; if (s > best) { best = s; bl = lag; } }
+const f0 = sr / bl;
+check(Math.abs(f0 - 440) < 8, `lead plays A4 in tune (${f0.toFixed(1)} Hz)`);
+// write a demo
+const wav = (Lc, Rc, file) => {
+  const n = Lc.length, b = Buffer.alloc(44 + n * 4);
+  b.write('RIFF', 0); b.writeUInt32LE(36 + n * 4, 4); b.write('WAVEfmt ', 8); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20);
+  b.writeUInt16LE(2, 22); b.writeUInt32LE(sr, 24); b.writeUInt32LE(sr * 4, 28); b.writeUInt16LE(4, 32); b.writeUInt16LE(16, 34);
+  b.write('data', 36); b.writeUInt32LE(n * 4, 40);
+  for (let i = 0; i < n; i++) { b.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(Lc[i] * 32767))), 44 + 4 * i); b.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(Rc[i] * 32767))), 46 + 4 * i); }
+  fs.writeFileSync(file, b);
+};
+fs.mkdirSync(path.join(web, 'out'), { recursive: true });
+wav(L, R, path.join(web, 'out', 'wasm_demo.wav'));
+console.log(fails ? `${fails} FAILED` : 'all passed');
+process.exit(fails ? 1 : 0);

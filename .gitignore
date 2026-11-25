@@ -36,3 +36,8 @@ __pycache__/
 *.syx
 /personal/
 /libraries/
+
+# Web build products (built by jazzband-op1r/web/build.sh and pack2web; the jazzbook site carries copies)
+/jazzband-op1r/web/jazzband.wasm
+/jazzband-op1r/web/packs/
+/jazzband-op1r/web/out/

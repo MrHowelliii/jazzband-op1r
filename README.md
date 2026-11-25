@@ -6,6 +6,11 @@ folder access depend on browser support and permission. If those are unavailable
 opening a local file, serve this folder with `python3 -m http.server 8765 --bind 127.0.0.1`
 and open `http://127.0.0.1:8765/Jazz%20Band%20Companion.html`.
 
+## Web build: the band in the browser
+
+`jazzband-op1r/web/` compiles the plugin's band (`jazzband.c`, unchanged apart from an optional per-tick hook) to
+WebAssembly with a lead voice, for the jazzbook play-along site. Build and details: `jazzband-op1r/web/README.md`.
+
 ## Plugin 1.5: 42 players, bossa nova, samples only
 
 SETUP BAND has 12 drummers (new: Tony Williams, Roy Haynes, Billy Higgins, Jo Jones, Jack DeJohnette, Max Roach,

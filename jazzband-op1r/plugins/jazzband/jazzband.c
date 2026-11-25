@@ -38,7 +38,9 @@ enum { SRC_SAMPLE, SRC_SYNTH_A, SRC_SYNTH_B };
 
 #define JB_TPB      12            /* ticks per beat: triplet grid, the swung 8th is tick 8 */
 #define JB_TPBAR    48
+#ifndef JB_MAXBARS
 #define JB_MAXBARS  128
+#endif
 #define JB_MAXEV    96
 #define JB_VOICES   30
 #define JB_GTRV     6             /* voices 0..5 are guitar strings (own delay lines) */
@@ -1970,6 +1972,9 @@ static void do_tick(jb_t *e, int32_t blocks_per_tick_q8) {
     e->strum_n = 0;
     if (e->tick % JB_TPB == 0) { e->s_beat = e->tick / JB_TPB; e->s_bar = e->bar; e->s_state = e->state; }
     for (int i = 0; i < e->nev; i++) if (e->ev[i].tick == e->tick) trigger(e, &e->ev[i], blocks_per_tick_q8);
+#ifdef JB_TICK_HOOK
+    JB_TICK_HOOK(e, blocks_per_tick_q8);                 /* web build: the lead line plays on the band's own ticks */
+#endif
     if (++e->tick >= e->tpbar) {
         /* one bar line, one order: a queued song first (it brings its own key, jump and settings: any queued key or
          * jump of the old song is dropped), else the count ends or the form moves on (a confirmed jump is part of the
