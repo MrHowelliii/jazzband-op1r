@@ -242,6 +242,7 @@ static void lead_note_on(jb_t *e, int note, int vel, int wait, int len_samples, 
             const jbpack_t *pk = PKS.ok[PK_LEAD];
             pv->type = VT_PK; pv->pk_d = pk_data(pk) + pz->off; pv->pk_len = (int32_t)pz->len; pv->pk_pos = 0;
             pv->pk_codec = pz->codec; pv->pk_pred = pz->pred; pv->pk_idx = pz->idx;
+            pv->pk_loop = pz->codec == 2 && pz->pred > 0 ? pz->pred * 16 : 0;      /* PCM zones: pred = loop start / 16 */
             pv->pk_inc = ((JB_RATIO[d + 48] >> 2) * (pz->step >> 2)) >> 12;
             pv->pk_s0 = pk_next(pv); pv->pk_s1 = pk_next(pv); pv->pk_frac = 0;
             int dyn = 40 + ((vel2 * 88) >> 7);

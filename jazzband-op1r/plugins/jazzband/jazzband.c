@@ -83,6 +83,9 @@ typedef struct {
     int16_t *ks; int16_t ksn, kspos, apc, ksfb; int32_t apx, apy;
     const int16_t *sd; int32_t spos, send, sgain; uint32_t sfrac, sinc;   /* sample playback */
     const uint8_t *pk_d; int32_t pk_pos, pk_len, pk_s0, pk_s1, pk_pred; uint32_t pk_frac, pk_inc; uint8_t pk_idx, pk_codec;   /* sound pack */
+#ifdef JB_WEB
+    int32_t pk_loop;                   /* > 0: at the end of the zone, carry on from this sample (a held lead note) */
+#endif
 } voice_t;
 
 typedef struct {
@@ -1767,6 +1770,9 @@ static void trigger(jb_t *e, const ev_t *ev, int32_t blocks_per_tick_q8) {
         const jbpack_t *pk = PKS.ok[pki];
         v->type = VT_PK; v->pk_d = pk_data(pk) + pz->off; v->pk_len = (int32_t)pz->len; v->pk_pos = 0;
         v->pk_codec = pz->codec; v->pk_pred = pz->pred; v->pk_idx = pz->idx;
+#ifdef JB_WEB
+        v->pk_loop = 0;
+#endif
         v->pk_inc = ((JB_RATIO[d + 48] >> 2) * (pz->step >> 2)) >> 12;
         v->pk_s0 = pk_next(v); v->pk_s1 = pk_next(v); v->pk_frac = 0;
         int vel2 = 48 + ((vel * 79) >> 7);                                        /* the layers carry most of the dynamics */
@@ -1941,6 +1947,9 @@ static void render_voice(jb_t *e, voice_t *v, int32_t *L, int32_t *R, int32_t *G
             v->pk_frac += v->pk_inc;
             while (v->pk_frac >= 65536) {
                 v->pk_frac -= 65536; v->pk_s0 = v->pk_s1;
+#ifdef JB_WEB
+                if (v->pk_pos >= v->pk_len && v->pk_loop > 0) v->pk_pos = v->pk_loop;
+#endif
                 if (v->pk_pos < v->pk_len) v->pk_s1 = pk_next(v); else { v->pk_s1 = 0; v->pk_pos++; }
             }
         } break;

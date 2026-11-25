@@ -61,6 +61,21 @@ PACKS = [
 ]
 
 
+def sustain_loop(z, rate, f):
+    """A held note: the zone ends inside the steady tone, cross-faded into the audio before the loop start, so the
+    engine can jump back there for as long as the note lasts. The loop is a whole number of periods long."""
+    x = z['x']
+    period = rate / f
+    l0 = (int(1.5 * rate) // 16) * 16
+    l1 = l0 + int(round(round(1.3 * rate / period) * period))
+    n = int(0.2 * rate)
+    if l1 > len(x) - int(0.1 * rate) or l0 < n: return
+    w = np.linspace(0.0, 1.0, n)
+    x = x[:l1].copy()
+    x[l1 - n:l1] = x[l1 - n:l1] * np.cos(w * np.pi / 2) + x[l0 - n:l0] * np.sin(w * np.pi / 2)
+    z['x'], z['loop'] = x, l0
+
+
 def build(name, inst, rate, gen, credit, out):
     from scipy.signal import butter, sosfilt
     zs = list(gen())
@@ -71,7 +86,7 @@ def build(name, inst, rate, gen, credit, out):
             x = y if x is None else (np.pad(x, (0, max(0, len(y) - len(x)))) + np.pad(y, (0, max(0, len(x) - len(y)))))
         if z.get('tone'): x = sosfilt(butter(2, z['tone'], fs=rate, output='sos'), x)
         z['x'] = mp.shape(x, rate, z['sec'], z.get('fade', 0.25))
-        z['cents'] = 0
+        z['cents'] = 0; z['loop'] = 0
         if inst:
             f, conf = mp.f0(z['x'], rate, 25 if inst == 1 else 60, 1500)
             m = 69 + 12 * math.log2(f / 440)
@@ -81,6 +96,7 @@ def build(name, inst, rate, gen, credit, out):
                 c = (m - z['key']) * 100
                 if conf < 0.3 and abs(c) <= (20 if inst == 1 else 40): z['cents'] = c
             z['f0'], z['conf'] = f, conf
+            if inst == LEAD: sustain_loop(z, rate, f)
     groups = {}
     for z in zs: groups.setdefault(z['key'] if inst == 0 else 0, []).append(z)
     for g in groups.values():
@@ -98,7 +114,7 @@ def build(name, inst, rate, gen, credit, out):
     for z in zs:
         x16 = np.clip(np.round(z['x'] * 32767), -32768, 32767).astype('<i2')
         step = round(65536 * rate / 44100 * 2 ** (-z['cents'] / 1200))
-        table += struct.pack('<BBBBIhBBII', z['key'], z['vlo'], z['vhi'], z['rr'], step, 0, 0, 2, len(data), len(x16))
+        table += struct.pack('<BBBBIhBBII', z['key'], z['vlo'], z['vhi'], z['rr'], step, z['loop'] // 16, 0, 2, len(data), len(x16))
         data += x16.tobytes()
         report.append(dict(key=z['key'], vel=[z['vlo'], z['vhi']], seconds=round(len(x16) / rate, 2), cents=round(z['cents'], 1),
                            **({'f0': round(z['f0'], 1)} if 'f0' in z else {})))
