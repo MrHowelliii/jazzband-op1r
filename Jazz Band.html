@@ -670,7 +670,7 @@ try { const t = localStorage.getItem('jb.theme'); if (t === 'light' || t === 'da
       <div class="pane-heading"><div><span class="eyebrow">Every device</span><h2>Sync with GitHub <span class="pill" id="syncPill">off</span></h2></div></div>
       <p class="note" id="syncMsg">Keep your songs, set lists and practice settings in a private GitHub repository: each device opens with them, and every change is saved there.</p>
       <div class="sync-form" id="syncForm">
-        <label class="field"><span class="label">Private repository</span><input id="syncRepo" placeholder="your-name/jazzband-library" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+        <label class="field"><span class="label">Private repository</span><input id="syncRepo" placeholder="owner/repository" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
         <label class="field"><span class="label">Access token</span><input id="syncToken" type="password" placeholder="github_pat_…" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
         <button class="btn primary" id="syncConnect">Connect</button>
       </div>
@@ -2517,7 +2517,10 @@ async function syncRun(first) {
 }
 $('syncConnect').onclick = async () => {
   const repo = $('syncRepo').value.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$|\/$/g, ''), token = $('syncToken').value.trim();
-  if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !token) { syncStatus('Enter the repository as owner/name, and the token.', 'error'); $('syncForm').hidden = false; return; }
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !token) {
+    syncStatus(!repo ? 'Type the repository, for example MrHowelliii/jazzband-library (the grey text is only an example).' : !token ? 'Paste the access token.' : 'Type the repository as owner/name, for example MrHowelliii/jazzband-library.', 'error');
+    $('syncForm').hidden = false; $(!/^[\w.-]+\/[\w.-]+$/.test(repo) ? 'syncRepo' : 'syncToken').focus(); return;
+  }
   sync.cfg = { repo, token, sha: null, dirty: false }; syncSave(); $('syncToken').value = '';
   syncStatus('Connecting…', 'saving');
   await syncRun(true);
