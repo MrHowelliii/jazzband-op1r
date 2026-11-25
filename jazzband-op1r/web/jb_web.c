@@ -137,7 +137,7 @@ static lnote_t LN[LEAD_MAX];
 static int lead_n, lead_first[JB_MAXBARS + 1];
 static lnote_t PICK[32]; static int pick_n;             /* the pickup: t from the start of the count-in bar */
 static uint32_t lead_mask = 0xFFFFFFFFu;                /* bit c-1: the lead plays in chorus c (beyond 32: bit 31) */
-static int lead_sound, lead_level = 26000, lead_oct;    /* sound: 0 synth (horn), 1 piano pack, 2 guitar pack, 3 vibes, 4 the lead pack (sax) */
+static int lead_sound, lead_level = 26000, lead_oct;    /* sound: 0 synth (horn), 1 piano pack, 2 guitar pack, 3 vibes, 6 the lead pack (sax) */
 static int human = 60;                                  /* 0 = exactly on the grid .. 100 = loose */
 static uint32_t hrng = 0x1234567u;
 static int hrand(int n) { hrng = hrng * 1664525u + 1013904223u; return n > 0 ? (int)((hrng >> 10) % (uint32_t)n) : 0; }
@@ -153,7 +153,7 @@ EXPORT(jbw_lead_set) void jbw_lead_set(int n, int npick) {
     for (int b = 0; b <= JB_MAXBARS; b++) { while (k < lead_n && LN[k].bar < b) k++; lead_first[b] = k; }
 }
 EXPORT(jbw_lead_mask) void jbw_lead_mask(uint32_t m) { lead_mask = m; }
-EXPORT(jbw_lead_sound) void jbw_lead_sound(int s, int level, int oct) { lead_sound = s < 0 || s > 4 ? 0 : s; lead_level = level; lead_oct = oct; }
+EXPORT(jbw_lead_sound) void jbw_lead_sound(int s, int level, int oct) { lead_sound = s < 0 || s > 6 ? 0 : s; lead_level = level; lead_oct = oct; }
 
 /* A player's touch for the band. Each instrument sits in its own place around the beat (the ride and the bass on
  * top of it, the piano and the guitar a little behind), moves a few milliseconds from note to note, and never hits
@@ -227,7 +227,7 @@ static void lead_note_on(jb_t *e, int note, int vel, int wait, int len_samples, 
         (void)len_samples;
         return;
     }
-    if (lead_sound == 4) {                                 /* the recorded lead instrument */
+    if (lead_sound == 6) {                                 /* the recorded lead instrument (4 and 5 are left to the site's own build) */
         static voice_t *prev; static const uint8_t *prev_d;
         int vel2 = vel + htri(6) * human / 60; if (vel2 < 20) vel2 = 20; if (vel2 > 127) vel2 = 127;
         const jbzone_t *pz = pk_zone(PK_LEAD, note, vel2);

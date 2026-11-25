@@ -48,7 +48,7 @@ João Gilberto plays the regular guitar pack.
 * **16-bit PCM packs** (`web/make_web_packs.py`, about 27 MB in all instead of 3 MB): no ADPCM coding noise, three
   piano dynamics, longer sustains, a 32 kHz bass, uncompressed cymbals. Written straight to `.jbp`; `pack2web` is
   only needed for OP-1 packs.
-* **A recorded lead**: pack slot 5 (`jblead`, alto saxophone). `jbw_lead_sound(4, level, octave)` plays the melody
+* **A recorded lead**: pack slot 5 (`jblead`, alto saxophone). `jbw_lead_sound(6, level, octave)` plays the melody
   from it, one note letting go as the next starts.
 * **A player's touch** (`JB_TRIGGER_HOOK`, `jbw_human(0..100)`, default 60): each instrument sits in its own place
   around the beat (ride and bass on top, piano and guitar a few milliseconds behind), placement and loudness move a

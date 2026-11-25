@@ -62,7 +62,7 @@ const alone = (sound) => {
   for (const v of seg) e2 += v * v;
   return [sr / bl, Math.sqrt(e2 / seg.length)];
 };
-const [f0, r0] = alone(0), [f4, r4] = alone(4), [, r1] = alone(1);
+const [f0, r0] = alone(0), [f4, r4] = alone(6), [, r1] = alone(1);
 check(Math.abs(f0 - 440) < 8, `synth lead plays A4 in tune (${f0.toFixed(1)} Hz)`);
 check(Math.abs(f4 - 440) < 8, `sax lead plays A4 in tune (${f4.toFixed(1)} Hz)`);
 check(r4 > r0 * 0.4 && r4 < r0 * 1.0, `sax lead sits a little under the synth lead (rms ${r4.toFixed(3)} vs ${r0.toFixed(3)}; piano, decaying, ${r1.toFixed(3)})`);
