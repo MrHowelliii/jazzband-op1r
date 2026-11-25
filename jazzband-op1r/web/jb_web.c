@@ -12,6 +12,8 @@
 #define JB_TRIGGER_HOOK(e, ev, bpt) web_trigger((void *)(e), (const void *)(ev), (bpt))
 static void web_tick(void *ev, int bpt_q8);
 static void web_trigger(void *e, const void *ev, int bpt_q8);
+#define JB_GEN_HOOK(e) web_gen((void *)(e))
+static int web_gen(void *e);
 #include "../plugins/jazzband/jazzband.c"
 
 int host_lines_n;
@@ -54,6 +56,7 @@ EXPORT(jbw_init) void jbw_init(void) {
 /* bars: 9 bytes each, written by the page at jbw_bars(): 4 x (root 0..11, quality Q_*), then a section letter or 0 */
 static uint8_t BARBUF[JB_MAXBARS * 9];
 EXPORT(jbw_bars) uint8_t *jbw_bars(void) { return BARBUF; }
+void jbw_feel(int feel);
 EXPORT(jbw_load) void jbw_load(int nbars, int beats, int bpm, int feel) {
     jb_t *e = E();
     if (e->state != ST_STOP) stop(e);
@@ -73,7 +76,7 @@ EXPORT(jbw_load) void jbw_load(int nbars, int beats, int bpm, int feel) {
         if (e->bars[b].section) { e->sec_at[e->nsec] = (uint8_t)b; e->sec_ch[e->nsec] = e->bars[b].section; e->nsec++; }
     e->loop = 0; e->lfrom = 0; e->lto = e->nbars - 1; e->kstep = KS_OFF; e->choruses = 0; e->intro = IN_COUNT;
     e->turn = TA_OFF; e->endtype = 0;
-    e->ballad = feel == 1; e->bossa = feel == 2;
+    jbw_feel(feel);
     e->shift = 0; e->pass = 0; e->chorus = 1; e->ending = 0; e->tag_i = 0; e->kind = BK_CHART;
     e->bcur = -1; e->sbar = -1; e->jump = -1; e->key_pend = 0; e->bm = 0;
     e->bar = 0; e->tick = 0;
@@ -91,7 +94,11 @@ EXPORT(jbw_finish) void jbw_finish(void) {              /* the musical ending af
     else if (e->state != ST_STOP) stop(e);
 }
 EXPORT(jbw_tempo) void jbw_tempo(int bpm) { set_bpm(E(), bpm < 40 ? 40 : bpm > 320 ? 320 : bpm); }
-EXPORT(jbw_feel) void jbw_feel(int feel) { jb_t *e = E(); e->ballad = feel == 1; e->bossa = feel == 2; }
+/* feel: 0 swing, 1 ballad, 2 bossa nova (the engine's own); web only: 3 two-feel, 4 two-feel for the first chorus then
+ * walking, 5 shuffle, 6 samba, 7 even eighths (see web_gen) */
+static int xfeel, trade;                                 /* trade: 0 off, else trade this many bars with the drums */
+EXPORT(jbw_feel) void jbw_feel(int feel) { jb_t *e = E(); e->ballad = feel == 1; e->bossa = feel == 2; xfeel = feel >= 3 && feel <= 7 ? feel : 0; }
+EXPORT(jbw_trade) void jbw_trade(int bars) { trade = bars == 4 || bars == 8 ? bars : 0; }
 EXPORT(jbw_transpose) void jbw_transpose(int semis) {
     jb_t *e = E(); semis = wrapk(semis);
     e->key_off = semis; e->transpose = e->s_transpose = semis; e->key_pend = 0;
@@ -326,6 +333,121 @@ static void lead_render(float *L, float *R, int frames) {
             L[n] += s * lvl * 0.62f; R[n] += s * lvl * 0.5f;
         }
     }
+}
+
+/* ------------------------------------------------------------------ more feels; trading with the drums
+ * The engine's bar generator asks first (JB_GEN_HOOK): returning 1 means this bar is written here. The band's own
+ * players are reused where they fit (walking bass, comping, the bossa clave for samba); the new parts are the drum
+ * grooves, the samba and even-eighth bass, and the drum solos. */
+enum { XF_TWO = 3, XF_TWO_FOUR, XF_SHUFFLE, XF_SAMBA, XF_EVEN };
+static void crash_in(jb_t *e) { if (e->crash_next) { add(e, 0, I_DRUMS, D_CRASH, 90, 1); add(e, 0, I_DRUMS, D_KICK, 80, 1); e->crash_next = 0; } }
+static void straighten(jb_t *e, int from) {              /* swung 8ths (tick 8 of the beat) to straight (6); 4 to 3 */
+    for (int i = from; i < e->nev; i++) { int t = e->ev[i].tick % JB_TPB; if (t == 8) e->ev[i].tick -= 2; else if (t == 4) e->ev[i].tick -= 1; }
+}
+static void fill_into(jb_t *e, int step) {               /* the last beat: a fill into the next section */
+    int end = e->tpbar;
+    for (int t = end - 12, i = 0; t < end; t += step, i++) add(e, t, I_DRUMS, i < 2 ? D_SNARE : i < 3 ? D_TOMH : D_TOML, 58 + i * 10, 1);
+    e->crash_next = 1;
+}
+static void drums_shuffle(jb_t *e) {                     /* the shuffle: ride on the triplet, backbeat, kick on 1 and 3 */
+    crash_in(e);
+    for (int b = 0; b < e->nb; b++) {
+        int t = b * 12;
+        add(e, t, I_DRUMS, D_RIDE, 86 + irand(e, 10), 1);
+        add(e, t + 8, I_DRUMS, D_RIDE, 62 + irand(e, 10), 1);
+        if (b & 1) { add(e, t, I_DRUMS, D_SNARE, 90 + irand(e, 10), 1); add(e, t, I_DRUMS, D_HAT, 60, 1); }
+        else add(e, t, I_DRUMS, D_KICK, 72 + irand(e, 8), 1);
+        if (chance(e, 180)) add(e, t + 8, I_DRUMS, D_KICK, 46, 1);
+    }
+    if ((e->bar + 1) % 8 == 0) fill_into(e, 4);
+}
+static void drums_samba(jb_t *e) {                       /* straight 16ths on the shaker, surdo kick on 2, cross-stick */
+    static const uint8_t st[4] = {6, 15, 30, 39};
+    int end = e->tpbar;
+    crash_in(e);
+    for (int t = 0; t < end; t += 3) add(e, t, I_DRUMS, D_SHAKER, (t % 12 == 0 ? 70 : t % 6 == 0 ? 58 : 44) + irand(e, 8), 1);
+    for (int h = 0; h * 24 < end; h++) {
+        add(e, h * 24, I_DRUMS, D_KICK, 52, 1);
+        if (h * 24 + 9 < end) add(e, h * 24 + 9, I_DRUMS, D_KICK, 40, 1);
+        if (h * 24 + 12 < end) add(e, h * 24 + 12, I_DRUMS, D_KICK, 84, 1);
+    }
+    for (int i = 0; i < 4; i++) if (st[i] < end) add(e, st[i], I_DRUMS, D_STICK, 60 + irand(e, 12), 1);
+    if ((e->bar + 1) % 8 == 0) fill_into(e, 3);
+}
+static void drums_even(jb_t *e) {                        /* even eighths: hat 8ths, backbeat, a kick that moves */
+    int end = e->tpbar;
+    crash_in(e);
+    for (int t = 0; t < end; t += 6) add(e, t, I_DRUMS, D_HAT, (t % 12 == 0 ? 78 : 56) + irand(e, 8), 1);
+    for (int b = 1; b < e->nb; b += 2) add(e, b * 12, I_DRUMS, D_SNARE, 92 + irand(e, 8), 1);
+    add(e, 0, I_DRUMS, D_KICK, 88, 1);
+    if (18 < end) add(e, 18, I_DRUMS, D_KICK, 70, 1);
+    if (24 < end) add(e, 24, I_DRUMS, D_KICK, chance(e, 500) ? 80 : 60, 1);
+    if (30 < end && chance(e, 350)) add(e, 30, I_DRUMS, D_KICK, 62, 1);
+    if (chance(e, 300)) add(e, 21, I_DRUMS, D_SNARE, 30, 1);
+    if (45 < end && chance(e, 300)) add(e, 45, I_DRUMS, D_SNARE, 30, 1);
+    if ((e->bar + 1) % 8 == 0) fill_into(e, 3);
+}
+static void bass_samba(jb_t *e, const chord_t *c) {      /* each half bar: root (dotted 8th), a 16th pickup, the fifth on 2 */
+    const int lo = 28, hi = 48; int last = e->bass_last;
+    for (int h = 0; h * 24 < e->tpbar; h++) {
+        chord_t ch = c[h * 2];
+        int r = nearest(ch.root, last, lo, hi), f = nearest(pcof(ch.root + fifth(ch.q)), r - 5, lo, hi);
+        add(e, h * 24, I_BASS, r, 100, 8);
+        if (h * 24 + 12 < e->tpbar) { add(e, h * 24 + 9, I_BASS, r, 70, 2); add(e, h * 24 + 12, I_BASS, f, 90, 10); }
+        last = f;
+    }
+    e->bass_last = last;
+}
+static void bass_even(jb_t *e, const chord_t *c) {       /* even eighths: root on 1 and the and of 2, then 3 */
+    const int lo = 28, hi = 48; int last = e->bass_last;
+    int r = nearest(c[0].root, last, lo, hi);
+    add(e, 0, I_BASS, r, 100, 10);
+    if (18 < e->tpbar) add(e, 18, I_BASS, r, 80, 5);
+    if (24 < e->tpbar) {
+        int n = ceq(c[2], c[0]) ? nearest(pcof(c[0].root + fifth(c[0].q)), r, lo, hi) : nearest(c[2].root, r, lo, hi);
+        add(e, 24, I_BASS, n, 92, 10); last = n;
+        if (42 < e->tpbar && chance(e, 600)) { int o = fold(n + 12, lo, hi + 12); add(e, 42, I_BASS, o, 72, 4); }
+    }
+    e->bass_last = last;
+}
+static void drums_solo(jb_t *e) {                        /* trading: the drummer's bars, phrases on the triplet grid */
+    static const uint8_t kit[6] = {D_SNARE, D_SNARE, D_TOMH, D_TOML, D_KICK, D_SNARE};
+    int end = e->tpbar, first = e->bar % trade == 0, last = (e->bar + 1) % trade == 0;
+    if (first) { add(e, 0, I_DRUMS, D_CRASH, 96, 1); add(e, 0, I_DRUMS, D_KICK, 90, 1); }
+    for (int b = 1; b < e->nb; b += 2) add(e, b * 12, I_DRUMS, D_HAT, 64, 1);       /* the hi-hat foot keeps 2 and 4 */
+    int dense = 380 + 120 * (e->bar % trade);            /* building through the solo */
+    for (int t = first ? 4 : 0; t < (last ? end - 12 : end); t += 4) {
+        if (!chance(e, t % 12 == 0 ? dense : dense - 150)) continue;
+        int d = kit[irand(e, 6)];
+        add(e, t, I_DRUMS, d, 52 + irand(e, 46) + (t % 12 == 0 ? 10 : 0), 1);
+        if (d != D_KICK && chance(e, 200)) add(e, t, I_DRUMS, D_KICK, 60, 1);
+    }
+    if (last) fill_into(e, 4);
+}
+static int trading_now(jb_t *e) {                        /* the drums' turn: a solo chorus (no melody), every other 4 or 8 */
+    if (!trade || e->kind != BK_CHART || e->state != ST_PLAY || e->bar < 0) return 0;
+    int c = e->chorus < 1 ? 1 : e->chorus > 32 ? 32 : e->chorus;
+    if ((lead_mask >> (c - 1)) & 1) return 0;
+    return (e->bar / trade) & 1;
+}
+static int web_gen(void *ev) {
+    jb_t *e = ev;
+    if (trading_now(e)) { drums_solo(e); return 1; }
+    int f = xfeel;
+    if (f == XF_TWO_FOUR && e->chorus > 1) f = 0;
+    if (!f) return 0;
+    chord_t c[5]; for (int b = 0; b < 4; b++) c[b] = cur_chord(e, b);
+    c[e->nb] = next_chord(e);
+    switch (f) {
+    case XF_TWO: case XF_TWO_FOUR:
+        gen_drums(e);
+        if (e->nb == 3) bass_waltz_two(e, c, 28, 50); else bass_two_feel(e, c, 28, 50);
+        gen_piano(e); gen_guitar(e); break;
+    case XF_SHUFFLE: drums_shuffle(e); gen_bass(e); gen_piano(e); gen_guitar(e); break;
+    case XF_SAMBA: { drums_samba(e); bass_samba(e, c); int sb = e->bossa; e->bossa = 1; gen_piano(e); gen_guitar(e); e->bossa = sb; break; }
+    case XF_EVEN: { drums_even(e); bass_even(e, c); int n0 = e->nev; gen_piano(e); gen_guitar(e); straighten(e, n0); break; }
+    }
+    return 1;
 }
 
 /* ------------------------------------------------------------------ audio */

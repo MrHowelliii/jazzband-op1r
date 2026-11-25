@@ -82,6 +82,34 @@ check(r4 > r0 * 0.4 && r4 < r0 * 1.0, `sax lead sits a little under the synth le
   check(Math.max(...steps) < 0.35, `its level stays even through the loop (largest half-second change ${(Math.max(...steps) * 100).toFixed(0)}%)`);
 }
 // a player's touch moves notes by milliseconds, never the bar lines; off = the old exact playback
+// more feels (web only) and trading fours: each feel plays in time; the drums alone in the drum solo bars
+X.jbw_lead_sound(0, 1, 0);
+const band = (feel, onlyInst, nbars) => {         // render nbars after the count-in; rms per bar with one instrument on
+  X.jbw_stop(); for (let i = 0; i < 600; i++) X.jbw_render();
+  for (let i = 0; i < 4; i++) X.jbw_level(i, onlyInst < 0 || i === onlyInst ? 26000 : 1);
+  X.jbw_feel(feel); X.jbw_play(-1);
+  const per = [], spb = sr * 2; let acc = 0, n = 0, pk = 0;
+  for (let i = 0; i < (nbars + 1) * spb / 128; i++) {
+    X.jbw_render(); const b = new Float32Array(X.memory.buffer, X.jbw_out_l(), 128);
+    for (let k = 0; k < 128; k++) { acc += b[k] * b[k]; pk = Math.max(pk, Math.abs(b[k])); if (Number.isNaN(b[k])) pk = 9; }
+    n += 128; if (n >= spb) { per.push(Math.sqrt(acc / n)); acc = 0; n = 0; }
+  }
+  return { per: per.slice(1), pk };                // drop the count-in bar
+};
+for (const [f, name] of [[3, 'two-feel'], [4, 'two-feel, then four'], [5, 'shuffle'], [6, 'samba'], [7, 'even eighths']]) {
+  const { per, pk } = band(f, -1, 8);
+  check(pk > 0.03 && pk <= 1 && per.every(r => r > 0.005), `${name}: the band plays every bar (peak ${pk.toFixed(2)})`);
+}
+// trading fours on the solo choruses: melody in chorus 1 only, 8-bar chart, so in chorus 2 bars 5-8 are the drums'
+X.jbw_lead_mask(1); X.jbw_trade(4); X.jbw_form(3, 0, 0, 0);
+{ const bass = band(0, 1, 16).per, drums = band(0, 0, 16).per;
+  const q = (a, i, j) => a.slice(i, j).reduce((s, x) => s + x, 0) / (j - i);
+  check(q(bass, 8, 12) > 0.004 && q(bass, 12, 16) < q(bass, 8, 12) * 0.1,
+    `trading: the bass comps your 4 and lays out for the drums' 4 (${q(bass, 8, 12).toFixed(4)} / ${q(bass, 12, 16).toFixed(4)})`);
+  check(q(bass, 4, 8) > 0.004, 'no trading while the melody plays (chorus 1)');
+  check(q(drums, 12, 16) > q(drums, 8, 12) * 0.6, `the drums solo in their 4 (${q(drums, 12, 16).toFixed(3)} vs ${q(drums, 8, 12).toFixed(3)})`);
+}
+X.jbw_trade(0); X.jbw_lead_mask(0xFFFFFFFF); X.jbw_feel(0); for (let i = 0; i < 4; i++) X.jbw_level(i, 26000);
 X.jbw_stop(); X.jbw_human(0);
 // write a demo
 const wav = (Lc, Rc, file) => {

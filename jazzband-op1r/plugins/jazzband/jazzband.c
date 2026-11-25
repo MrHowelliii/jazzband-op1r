@@ -1722,7 +1722,10 @@ static void gen_bar(jb_t *e) {
         gtr_chord(e, 0, c, 3, ring, 66);
         return;
     }
-    gen_drums(e); gen_bass(e); gen_piano(e); gen_guitar(e);
+#ifdef JB_GEN_HOOK                                      /* web build: more feels, trading with the drums */
+    if (!JB_GEN_HOOK(e))
+#endif
+    { gen_drums(e); gen_bass(e); gen_piano(e); gen_guitar(e); }
     if (e->nx_kind == BK_FINAL) {                             /* set up the last chord: a triplet fill on 4 */
         for (int t = 36; t < 48; t += 4) add(e, t, I_DRUMS, D_SNARE, 70 + (t - 36) * 3, 1);
         add(e, 44, I_DRUMS, D_KICK, 84, 1);
