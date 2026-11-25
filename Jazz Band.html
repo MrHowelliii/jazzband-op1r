@@ -361,7 +361,8 @@ try { const t = localStorage.getItem('jb.theme'); if (t === 'light' || t === 'da
   }
 
   /* ---------- songs ---------- */
-  .sync-card { margin-bottom:16px; }
+  .sync-card { margin:16px 0; }
+  .import-area { margin-top:16px; }
   .sync-card h2 { display:flex; align-items:center; gap:10px; font-size:18px; }
   .sync-form { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; gap:10px; align-items:end; margin-top:12px; }
   .sync-help { margin-top:6px; } .sync-help .steps { margin:4px 0 0; }
@@ -669,29 +670,6 @@ try { const t = localStorage.getItem('jb.theme'); if (t === 'light' || t === 'da
       <button class="btn" id="libraryBackup">Back up library</button>
     </div>
 
-    <section class="card sync-card" id="syncCard" aria-label="Sync with GitHub">
-      <div class="pane-heading"><div><span class="eyebrow">Every device</span><h2>Sync with GitHub <span class="pill" id="syncPill">off</span></h2></div></div>
-      <p class="note" id="syncMsg">Keep your songs, set lists and practice settings in a private GitHub repository: each device opens with them, and every change is saved there.</p>
-      <div class="sync-form" id="syncForm">
-        <label class="field"><span class="label">Private repository, or a setup link</span><input id="syncRepo" placeholder="owner/repository" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
-        <label class="field"><span class="label">Access token</span><input id="syncToken" type="password" placeholder="github_pat_…" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
-        <button class="btn primary" id="syncConnect">Connect</button>
-      </div>
-      <details class="sync-help" id="syncHelp"><summary>How to set it up</summary><ol class="steps">
-        <li>On github.com, create a <b>private</b> repository (for example <code>jazzband-library</code>).</li>
-        <li>Settings → Developer settings → Fine-grained tokens → <b>Generate new token</b>: <i>Only select repositories</i> → that repository; Permissions → Contents: <b>Read and write</b>.</li>
-        <li>Paste the repository (<code>owner/name</code>) and the token here, once on each device. The token stays on this device.</li></ol></details>
-      <div class="row-actions" id="syncActions" hidden><button class="btn primary" id="syncShare">Add another device</button><button class="btn" id="syncNow">Sync now</button><button class="text-btn" id="syncOff">Disconnect this device</button></div>
-    </section>
-
-    <section class="import-area" id="importDrop" aria-label="Import song files">
-      <span class="import-symbol" aria-hidden="true">＋</span>
-      <div><h2>Add songs</h2><p>Drop iReal Pro exports or Jazz Band backups (HTML, text or JSON)</p></div>
-      <button class="btn" id="browseFiles">Choose files</button><input id="libraryFiles" type="file" accept=".html,.htm,.txt,.url,.json" multiple hidden>
-    </section>
-    <details class="paste-import"><summary>Paste an iReal Pro link instead</summary><textarea id="irLink" class="link" spellcheck="false" aria-label="iReal Pro link or HTML" placeholder="irealb://…"></textarea><button class="btn" id="irImport">Import</button></details>
-    <p class="import-feedback" id="irMsg" role="status"></p>
-
     <div class="song-workspace">
       <section class="card song-pane" id="libraryDrop" aria-label="Song library">
         <div class="pane-heading"><div><span class="eyebrow">This browser</span><h2>Library <span id="libraryCount" class="count"></span></h2></div><button class="text-btn" id="libraryAll">Add all</button></div>
@@ -715,6 +693,31 @@ try { const t = localStorage.getItem('jb.theme'); if (t === 'light' || t === 'da
       <div class="set-tabs" id="setTabs" role="tablist" aria-label="Your set lists"></div>
       <div id="setEditor"></div>
     </section>
+
+    <section class="import-area" id="importDrop" aria-label="Import song files">
+      <span class="import-symbol" aria-hidden="true">＋</span>
+      <div><h2>Add songs</h2><p>Drop iReal Pro exports or Jazz Band backups (HTML, text or JSON)</p></div>
+      <button class="btn" id="browseFiles">Choose files</button><input id="libraryFiles" type="file" accept=".html,.htm,.txt,.url,.json" multiple hidden>
+    </section>
+    <details class="paste-import"><summary>Paste an iReal Pro link instead</summary><textarea id="irLink" class="link" spellcheck="false" aria-label="iReal Pro link or HTML" placeholder="irealb://…"></textarea><button class="btn" id="irImport">Import</button></details>
+    <p class="import-feedback" id="irMsg" role="status"></p>
+
+
+    <section class="card sync-card" id="syncCard" aria-label="Sync with GitHub">
+      <div class="pane-heading"><div><span class="eyebrow">Every device</span><h2>Sync with GitHub <span class="pill" id="syncPill">off</span></h2></div></div>
+      <p class="note" id="syncMsg">Keep your songs, set lists and practice settings in a private GitHub repository: each device opens with them, and every change is saved there.</p>
+      <div class="sync-form" id="syncForm">
+        <label class="field"><span class="label">Private repository, or a setup link</span><input id="syncRepo" placeholder="owner/repository" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+        <label class="field"><span class="label">Access token</span><input id="syncToken" type="password" placeholder="github_pat_…" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+        <button class="btn primary" id="syncConnect">Connect</button>
+      </div>
+      <details class="sync-help" id="syncHelp"><summary>How to set it up</summary><ol class="steps">
+        <li>On github.com, create a <b>private</b> repository (for example <code>jazzband-library</code>).</li>
+        <li>Settings → Developer settings → Fine-grained tokens → <b>Generate new token</b>: <i>Only select repositories</i> → that repository; Permissions → Contents: <b>Read and write</b>.</li>
+        <li>Paste the repository (<code>owner/name</code>) and the token here, once on each device. The token stays on this device.</li></ol></details>
+      <div class="row-actions" id="syncActions" hidden><button class="btn primary" id="syncShare">Add another device</button><button class="btn" id="syncNow">Sync now</button><button class="text-btn" id="syncOff">Disconnect this device</button></div>
+    </section>
+
 
     <div class="card transfer-panel">
       <div><span class="eyebrow">Send</span><h2>Put these songs on the OP-1</h2><p class="note">USB in normal mode (not disk mode). Press <b>T1</b> on the OP-1 when asked; it restarts with your songbook and set lists.</p></div>
@@ -2189,14 +2192,20 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('sheet'
 function songMeta(s) { const k = songKey(s); return [NOTE[k.key] + (k.minor ? 'm' : ''), (s.practice || s.tempo) + ' BPM', feelOf(s) ? FEELS[feelOf(s)] : ''].filter(Boolean).join(' · '); }
 function openSongPicker() {
   const draw = body => {
-    const set = sets[st.set], list = set ? setSongs(set) : songs, q = (band.pickQ || '').toLowerCase();
-    const items = list.map(s => ({ s, i: songs.indexOf(s) })).filter(x => !q || `${x.s.title} ${x.s.composer || ''}`.toLowerCase().includes(q));
+    const set = sets[st.set], list = set ? setSongs(set) : songs, q = (band.pickQ || '').toLowerCase().trim(), words = q.split(/\s+/).filter(Boolean);
+    const found = list.map(s => ({ s, i: songs.indexOf(s) })).filter(x => { const t = `${x.s.title} ${x.s.composer || ''}`.toLowerCase(); return words.every(w => t.includes(w)); });
+    if (q) found.sort(byRank(q));
+    const searchFirst = !set && list.length > SEARCH_FIRST && !q;
+    const items = searchFirst ? [] : found.slice(0, SEARCH_MAX);
     const playing = st.playing, pend = band.s && band.s.pend >= 0 ? band.map[band.s.pend] : -1;
     body.querySelector('.chips').innerHTML = [`<button class="chip" data-set="-1" aria-pressed="${st.set < 0}">All songs</button>`]
       .concat(sets.map((x, k) => setSongs(x).length ? `<button class="chip" data-set="${k}" aria-pressed="${st.set === k}">${escapeHTML(x.name)}</button>` : '')).join('');
     body.querySelector('.pick-list').innerHTML = items.map(({ s, i }, n) => `<button class="pick${i === st.idx ? ' playing' : ''}" data-song="${i}">
       <span class="num">${n + 1}</span><span class="t">${escapeHTML(s.title)}<span class="m">${escapeHTML(songMeta(s))}</span></span>
-      <span class="tag">${i === st.idx ? (playing ? 'Playing' : 'Loaded') : i === pend ? 'Next' : ''}</span></button>`).join('') || '<p class="note">No songs found.</p>';
+      <span class="tag">${i === st.idx ? (playing ? 'Playing' : 'Loaded') : i === pend ? 'Next' : ''}</span></button>`).join('')
+      + (found.length > items.length && !searchFirst ? `<p class="note" style="padding:10px 4px">${(found.length - items.length).toLocaleString()} more: type more to narrow it down.</p>` : '')
+      || (searchFirst ? `<p class="note" style="padding:10px 4px">Type to search ${list.length.toLocaleString()} songs by title or composer${sets.some(x => setSongs(x).length) ? ', or pick a set list above' : ''}.</p>` : '<p class="note">No songs found.</p>');
+    const qi = body.querySelector('.pick-q'); if (qi) qi.placeholder = set ? `Search ${set.name}` : `Search ${songs.length.toLocaleString()} songs`;
     body.querySelector('.sheet-sub').textContent = playing ? 'The band is playing: the song you pick starts at the next bar line.' : 'Pick a song, then press Play.';
   };
   openSheet('Songs', `<p class="sheet-sub"></p><div class="chips" role="group" aria-label="Set lists"></div>
@@ -2779,13 +2788,25 @@ function moveSong(index, beforeIndex) {
   const position = target ? songs.indexOf(target) : songs.length;
   songs.splice(position, 0, moving); refreshSongOrder(current); libraryChanged();
 }
+const SEARCH_FIRST = 60, SEARCH_MAX = 50;              /* a library bigger than this opens on a search box */
+function searchRank(s, q) {                            /* titles that start with the search first, then titles holding it */
+  const t = s.title.toLowerCase().replace(/^the /, '');
+  return !q ? 0 : t.startsWith(q) ? 0 : t.includes(q) ? 1 : q.split(/\s+/).every(w => t.includes(w)) ? 2 : 3;
+}
+const byRank = q => (a, b) => searchRank(a.s, q) - searchRank(b.s, q) || a.s.title.localeCompare(b.s.title);
 function renderLib() {
-  const filter = $('librarySearch').value.toLowerCase().trim();
-  const matches = songs.map((s, i) => ({s, i})).filter(({s}) => `${s.title} ${s.composer || ''}`.toLowerCase().includes(filter));
+  const filter = $('librarySearch').value.toLowerCase().trim(), big = songs.length > SEARCH_FIRST;
+  const words = filter.split(/\s+/).filter(Boolean);
+  const all = songs.map((s, i) => ({s, i})).filter(({s}) => { const t = `${s.title} ${s.composer || ''}`.toLowerCase(); return words.every(w => t.includes(w)); });
+  if (filter) all.sort(byRank(filter));
+  const matches = big && !filter ? [] : all.slice(0, SEARCH_MAX);
   const selected = songs.map((s, i) => ({s, i})).filter(({s}) => s.op1 !== false);
   $('libraryCount').textContent = songs.length;
   $('songbookCount').textContent = `${selected.length} / 127`;
-  $('lib').innerHTML = matches.map(({s, i}) => songCard(s, i, false)).join('') || '<div class="empty-list"><strong>No songs found</strong>Try a different title or composer.</div>';
+  $('lib').innerHTML = big && !filter ? `<div class="empty-list"><strong>Search ${songs.length.toLocaleString()} songs</strong>Type part of a title or a composer above.</div>`
+    : matches.map(({s, i}) => songCard(s, i, false)).join('') + (all.length > SEARCH_MAX ? `<div class="empty-list">${(all.length - SEARCH_MAX).toLocaleString()} more: type more to narrow it down.</div>` : '')
+      || '<div class="empty-list"><strong>No songs found</strong>Try a different title or composer.</div>';
+  $('librarySearch').placeholder = big ? `Search ${songs.length.toLocaleString()} songs by title or composer` : 'Search title or composer';
   $('songbookList').innerHTML = selected.map(({s, i}, order) => songCard(s, i, true, order)).join('') || '<div class="empty-list"><strong>Your OP-1 songbook starts here</strong>Drop songs from your library, or choose Add.</div>';
   document.querySelectorAll('[data-preview]').forEach(button => button.onclick = () => {
     selectSong(+button.dataset.preview); showView('practice');
@@ -2818,7 +2839,7 @@ function renderLib() {
   $('warningAck').style.display = !selected.some(({s}) => s.warnings?.length) ? 'none' : 'flex';
   $('warningAck').hidden = !selected.some(({s}) => s.warnings?.length);
   $('libraryNone').disabled = !selected.length;
-  $('libraryAll').disabled = selected.length === songs.length;
+  $('libraryAll').disabled = selected.length === songs.length; $('libraryAll').hidden = songs.length > 127;   /* the OP-1 holds 127 */
   $('setState').textContent = savedSongbookRevision === songbookRevision ? savedVia : songbookRevision ? 'Unsaved changes · Send to update your OP-1' : 'Local songbook · Send to update your OP-1';
 }
 function libraryChanged() { songbookRevision++; $('acceptWarnings').checked = false; pruneSets(); saveSongs(); renderLib(); renderSets(); if (typeof bandLibraryChanged === 'function') bandLibraryChanged(); }
