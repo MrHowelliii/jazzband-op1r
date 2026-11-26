@@ -12,7 +12,7 @@ check(WebAssembly.Module.imports(mod).length === 0, `no imports (${WebAssembly.M
 const { exports: X } = await WebAssembly.instantiate(mod, {});
 const mem = () => new Uint8Array(X.memory.buffer);
 X.jbw_init();
-for (const p of ['jbdrums', 'jbbass', 'jbpiano', 'jbguitar', 'jblead']) {
+for (const p of ['jbdrums', 'jbbass', 'jbpiano', 'jbguitar', 'jblead', 'jbgtrlead']) {
   const f = path.join(web, 'packs', p + '.jbp');
   if (!fs.existsSync(f)) { console.log('skip  ' + p + ' (not built)'); continue; }
   const b = fs.readFileSync(f); const ptr = X.jbw_alloc(b.length);
@@ -32,7 +32,7 @@ X.jbw_lead_set(8, 0);
 X.jbw_lead_sound(0, 30000, 0);
 // let the pack checksums run (they are checked 4 KB a block)
 for (let i = 0; i < 2500; i++) X.jbw_render();
-for (const [i, n] of [[0, 'drums'], [1, 'bass'], [2, 'piano'], [3, 'guitar'], [5, 'lead (sax)']]) check(X.jbw_pack_ok(i) === 1, `${n} pack verified`);
+for (const [i, n] of [[0, 'drums'], [1, 'bass'], [2, 'piano'], [3, 'guitar'], [5, 'lead (sax)'], [6, 'lead (guitar)']]) check(X.jbw_pack_ok(i) === 1, `${n} pack verified`);
 X.jbw_play(-1);
 const sr = 44100, secs = 20, L = new Float32Array(128 * Math.floor(sr * secs / 128)), R = new Float32Array(L.length);
 const bars_seen = []; let last = -1;
@@ -66,6 +66,9 @@ const [f0, r0] = alone(0), [f4, r4] = alone(6), [, r1] = alone(1);
 check(Math.abs(f0 - 440) < 8, `synth lead plays A4 in tune (${f0.toFixed(1)} Hz)`);
 check(Math.abs(f4 - 440) < 8, `sax lead plays A4 in tune (${f4.toFixed(1)} Hz)`);
 check(r4 > r0 * 0.4 && r4 < r0 * 1.0, `sax lead sits a little under the synth lead (rms ${r4.toFixed(3)} vs ${r0.toFixed(3)}; piano, decaying, ${r1.toFixed(3)})`);
+{ const [fg, rg] = alone(2);                       // the melody guitar: an octave under the page, about as loud as the sax
+  check(Math.abs(fg - 220) < 5, `guitar lead plays the A4 melody note as A3, where a guitarist plays it (${fg.toFixed(1)} Hz)`);
+  check(rg > r4 * 0.6 && rg < r4 * 1.6, `guitar lead sits with the sax (rms ${rg.toFixed(3)} vs ${r4.toFixed(3)})`); }
 // a held note (two tied bars and more) keeps sounding: the sax zone loops inside its steady tone
 { X.jbw_stop(); X.jbw_lead_sound(6, 30000, 0);
   dv().setUint16(LN + 4, 1500, true);                     // bar 1: 1500 / 48 quarter notes = 15.6 s at 120 BPM
@@ -82,6 +85,25 @@ check(r4 > r0 * 0.4 && r4 < r0 * 1.0, `sax lead sits a little under the synth le
   check(Math.max(...steps) < 0.35, `its level stays even through the loop (largest half-second change ${(Math.max(...steps) * 100).toFixed(0)}%)`);
 }
 // a player's touch moves notes by milliseconds, never the bar lines; off = the old exact playback
+// MIDI out: the bass part and the melody as note events, MIDI clock at 24 a beat
+{ X.jbw_stop(); X.jbw_feel(0); X.jbw_trade(0); X.jbw_lead_mask(0xFFFFFFFF); X.jbw_lead_sound(0, 30000, 0);
+  for (let i = 0; i < 600; i++) X.jbw_render();
+  X.jbw_midi_route((1 << 1) | (1 << 4), 1); X.jbw_play(-1);
+  const evs = []; let frame = 0;
+  for (let i = 0; i < Math.floor(sr * 6 / 128); i++) {
+    X.jbw_render(); const n = X.jbw_midi_n(), p = X.jbw_midi_buf(), d = new DataView(X.memory.buffer);
+    for (let k = 0; k < n; k++) { const o = p + 12 * k; evs.push({ inst: d.getUint8(o), note: d.getUint8(o + 1), vel: d.getUint8(o + 2), kind: d.getUint8(o + 3), at: frame + d.getInt32(o + 4, true), len: d.getInt32(o + 8, true) }); }
+    frame += 128;
+  }
+  X.jbw_midi_route(0, 0);
+  const bass = evs.filter(e => !e.kind && e.inst === 1), mel = evs.filter(e => !e.kind && e.inst === 4), clk = evs.filter(e => e.kind === 1);
+  const inBar1 = (e) => e.at >= sr * 2 - 256 && e.at < sr * 4 - 256;    // 120 BPM: count-in 0-2 s, bar 1 2-4 s
+  check(bass.filter(inBar1).length >= 2 && bass.every(e => e.note >= 24 && e.note <= 60), `bass part out over MIDI (${bass.filter(inBar1).length} notes in bar 1, ${bass[0] && bass[0].note})`);
+  check(mel.filter(inBar1).length === 1 && mel.filter(inBar1)[0].note === 69, 'melody out over MIDI (the held A4 the test before left in bar 1)');
+  const perBeat = clk.filter(e => e.at >= sr * 2 && e.at < sr * 4).length / 4;
+  check(perBeat === 24, `MIDI clock: ${perBeat} pulses a beat`);
+  check(evs.every(e => e.at >= 0), 'events carry their place in the render call');
+}
 // more feels (web only) and trading fours: each feel plays in time; the drums alone in the drum solo bars
 X.jbw_lead_sound(0, 1, 0);
 const band = (feel, onlyInst, nbars) => {         // render nbars after the count-in; rms per bar with one instrument on

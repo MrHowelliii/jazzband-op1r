@@ -34,6 +34,27 @@ def zones_guitar():
         z['sec'] = 1.8; z['tone'] = 6500; yield z
 
 
+GLEAD = 6
+GLEAD_NOTES = "c3 eb3 gb3 a3 c4 eb4 gb4 a4 c5 eb5 gb5 a5 c6".split()
+
+
+def zones_glead():
+    """The melody guitar: the archtop's pickup alone (no room microphone: that is the thin, tinny part), the medium and
+    firm picking layers, long natural sustain, the top rolled off and the body brought up a little."""
+    for n in GLEAD_NOTES:
+        for v, lo, hi in ((2, 0, 92), (3, 93, 127)):
+            yield dict(key=mp.midi_of(n), vlo=lo, vhi=hi, rr=0, sec=3.6, fade=0.6, tone=4200, warm=(220, 3.5),
+                       src=[(S('karoryfer.shinyguitar', 'Samples', 'electric', f'{n}_vl{v}_rr1_2.wav'), 1.0)])
+
+
+def low_shelf(x, rate, f0, gain_db):                     # RBJ cookbook low shelf, slope 1
+    from scipy.signal import lfilter
+    A = 10 ** (gain_db / 40); w = 2 * math.pi * f0 / rate; c, sn = math.cos(w), math.sin(w); al = sn / 2 * math.sqrt(2)
+    b = [A * ((A + 1) - (A - 1) * c + 2 * math.sqrt(A) * al), 2 * A * ((A - 1) - (A + 1) * c), A * ((A + 1) - (A - 1) * c - 2 * math.sqrt(A) * al)]
+    a = [(A + 1) + (A - 1) * c + 2 * math.sqrt(A) * al, -2 * ((A - 1) + (A + 1) * c), (A + 1) + (A - 1) * c - 2 * math.sqrt(A) * al]
+    return lfilter(b, a, x)
+
+
 def zones_drums():
     for z in mp.zones_drums():
         z.pop('mulaw', None)
@@ -58,6 +79,7 @@ PACKS = [
     ('jbguitar', 3, 32000, zones_guitar, 'SHINYGUITAR - KARORYFER SAMPLES - CC0'),
     ('jbdrums', 0, 44100, zones_drums, 'VIRTUOSITY DRUMS - VERSILIAN STUDIOS - CC0'),
     ('jblead', LEAD, 32000, zones_lead, 'WERESAX ALTO SAXOPHONE - KARORYFER SAMPLES - CC0'),
+    ('jbgtrlead', GLEAD, 32000, zones_glead, 'SHINYGUITAR PICKUP - KARORYFER SAMPLES - CC0'),
 ]
 
 
@@ -85,6 +107,7 @@ def build(name, inst, rate, gen, credit, out):
             y = mp.load(path, rate) * g
             x = y if x is None else (np.pad(x, (0, max(0, len(y) - len(x)))) + np.pad(y, (0, max(0, len(x) - len(y)))))
         if z.get('tone'): x = sosfilt(butter(2, z['tone'], fs=rate, output='sos'), x)
+        if z.get('warm'): x = low_shelf(x, rate, *z['warm'])
         z['x'] = mp.shape(x, rate, z['sec'], z.get('fade', 0.25))
         z['cents'] = 0; z['loop'] = 0
         if inst:

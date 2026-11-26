@@ -281,7 +281,8 @@ static int op1_fx_count;
 #define PK_NYLON   4                   /* 1.5: jbnylon, a nylon-string guitar for Joao Gilberto (pack inst 4) */
 #ifdef JB_WEB                          /* web build: one more pack (the lead instrument), 16-bit PCM zones, big packs */
 #define PK_LEAD    5
-#define PK_N       6
+#define PK_GLEAD   6                   /* jbgtrlead: the archtop's pickup, long notes, for a guitar melody */
+#define PK_N       7
 #define PK_MAXDATA (64u << 20)
 #define PK_BUDGET  65536u
 #define PK_CODECS  2

@@ -162,12 +162,35 @@ EXPORT(jbw_lead_set) void jbw_lead_set(int n, int npick) {
 EXPORT(jbw_lead_mask) void jbw_lead_mask(uint32_t m) { lead_mask = m; }
 EXPORT(jbw_lead_sound) void jbw_lead_sound(int s, int level, int oct) { lead_sound = s < 0 || s > 6 ? 0 : s; lead_level = level; lead_oct = oct; }
 
+/* MIDI out: the parts the page sends to another instrument (an OP-1, a synth) as note events, timed from the start
+ * of the current render call; the page reads them after each call (jbw_midi_*) and turns them into MIDI. */
+typedef struct { uint8_t inst, note, vel, kind; int32_t delay, len; } mev_t;   /* kind 0 note, 1 clock (24 ppq) */
+#define MQ_MAX 128
+static mev_t MQ[MQ_MAX]; static int mq_n, mq_base;
+static uint32_t midi_route;                               /* bit i: instrument i (0 drums .. 3 guitar, 4 melody) */
+static int midi_clock;
+EXPORT(jbw_midi_route) void jbw_midi_route(int mask, int clock) { midi_route = (uint32_t)mask; midi_clock = clock; }
+EXPORT(jbw_midi_buf) mev_t *jbw_midi_buf(void) { return MQ; }
+EXPORT(jbw_midi_n) int jbw_midi_n(void) { return mq_n; }
+static void mq_push(int inst, int note, int vel, int delay, int len, int kind) {
+    if (mq_n >= MQ_MAX) return;
+    mev_t *m = &MQ[mq_n++];
+    m->inst = (uint8_t)inst; m->note = (uint8_t)(note < 0 ? 0 : note > 127 ? 127 : note); m->vel = (uint8_t)(vel < 1 ? 1 : vel > 127 ? 127 : vel);
+    m->kind = (uint8_t)kind; m->delay = mq_base + (delay < 0 ? 0 : delay); m->len = len;
+}
+static void midi_band_note(jb_t *e, const ev_t *ev, int delay) {
+    if (!((midi_route >> ev->inst) & 1) || e != &S[POS]) return;
+    static const uint8_t GM[D_N] = {36, 38, 51, 42, 49, 37, 48, 45, 70, 63};   /* kick snare ride hat crash stick toms shaker conga */
+    int note = ev->inst == I_DRUMS ? (ev->note < D_N ? GM[ev->note] : 37) : ev->note;
+    mq_push(ev->inst, note, ev->vel, delay, (int)((int64_t)ev->dur * (e->spt >> 14)), 0);
+}
+
 /* A player's touch for the band. Each instrument sits in its own place around the beat (the ride and the bass on
  * top of it, the piano and the guitar a little behind), moves a few milliseconds from note to note, and never hits
  * two notes equally hard. A voice can only start later than its tick, so "ahead" means "delayed the least". */
 static void web_trigger(void *e_, const void *ev_, int bpt_q8) {
     jb_t *e = (jb_t *)e_; const ev_t *ev = (const ev_t *)ev_;
-    if (!human) { trigger(e, ev, bpt_q8); return; }
+    if (!human) { midi_band_note(e, ev, 0); trigger(e, ev, bpt_q8); return; }
     static const int16_t BASE[4] = {0, 110, 380, 230}, VAR[4] = {70, 170, 330, 170}, VELJ[4] = {7, 6, 8, 6};   /* samples at 44.1 kHz */
     static int last_tick = -1, last_bar = -1, off[4];
     if (e->tick != last_tick || e->bar != last_bar) {       /* one placement per instrument per tick: chords stay together */
@@ -184,6 +207,7 @@ static void web_trigger(void *e_, const void *ev_, int bpt_q8) {
     int d = off[inst];
     if (inst == I_DRUMS) d = x.note == D_RIDE ? 0 : hrand(60) * human / 60;        /* the ride leads the band */
     if (inst == I_PIANO) d += hrand(90) * human / 60;                              /* fingers do not land as one */
+    midi_band_note(e, &x, d);
     for (int i = 0; i < JB_VOICES; i++) {
         voice_t *vv = &e->v[i];
         if (vv->active && (!a0[i] || vv->g != g0[i] || vv->pk_d != d0[i])) vv->wait += d;
@@ -191,6 +215,9 @@ static void web_trigger(void *e_, const void *ev_, int bpt_q8) {
 }
 
 /* synth lead voices: float, mono, panned slightly left */
+#ifndef GLEAD_PK_G
+#define GLEAD_PK_G 1950                                 /* the melody guitar against the synth lead (web/test) */
+#endif
 #ifndef LEAD_PK_G
 #define LEAD_PK_G 1600                                  /* a sustained note sits a little under the synth lead (web/test) */
 #endif
@@ -217,6 +244,32 @@ static void lead_tables(void) {
 }
 static void lead_note_on(jb_t *e, int note, int vel, int wait, int len_samples, int bpt_q8, int dur_ticks) {
     if (note < 0) note = 0; if (note > 127) note = 127;
+    if (lead_sound == 2 && PKS.ok[PK_GLEAD]) {             /* the melody guitar: its own pack, an octave under the page
+                                                           * (guitar sounds an octave below written), notes ring their length */
+        static voice_t *prev; static const uint8_t *prev_d;
+        int n2 = note - 12, vel2 = vel + 6 + htri(6) * human / 60; if (vel2 < 20) vel2 = 20; if (vel2 > 127) vel2 = 127;
+        const jbzone_t *pz = pk_zone(PK_GLEAD, n2, vel2);
+        if (pz) {
+            if (prev && prev->active && prev->type == VT_PK && prev->pk_d == prev_d) { prev->len = 0; prev->rel = 30400; }   /* one line: lift the last finger */
+            voice_t *pv = alloc_voice(e, JB_GTRV, JB_VOICES);
+            for (int i = 0; i < 7; i++) { pv->ph[i] = 0; pv->inc[i] = 0; }
+            for (int i = 0; i < 4; i++) { pv->pa[i] = 0; pv->pd[i] = 32767; }
+            pv->hx = pv->hy = pv->hx2 = pv->hy2 = 0; pv->np = 0; pv->pitch = 0;
+            pv->active = 1; pv->dec = 32767; pv->rel = 31400; pv->pl = 23800; pv->pr = 22500;
+            int d = n2 - pz->key; if (d < -48) d = -48; if (d > 48) d = 48;
+            const jbpack_t *pk = PKS.ok[PK_GLEAD];
+            pv->type = VT_PK; pv->pk_d = pk_data(pk) + pz->off; pv->pk_len = (int32_t)pz->len; pv->pk_pos = 0;
+            pv->pk_codec = pz->codec; pv->pk_pred = pz->pred; pv->pk_idx = pz->idx; pv->pk_loop = 0;
+            pv->pk_inc = ((JB_RATIO[d + 48] >> 2) * (pz->step >> 2)) >> 12;
+            pv->pk_s0 = pk_next(pv); pv->pk_s1 = pk_next(pv); pv->pk_frac = 0;
+            int dyn = 52 + ((vel2 * 76) >> 7);
+            pv->g = mul30(dyn * G(GLEAD_PK_G), (lead_level * 40960) >> 15); pv->gprev = 0;
+            pv->len = len_samples / OP1_FX_BLOCK + 3; if (pv->len < 8) pv->len = 8;
+            pv->wait = wait + (60 + hrand(140)) * human / 60;
+            prev = pv; prev_d = pv->pk_d;
+            return;
+        }
+    }
     if (lead_sound == 1 || lead_sound == 2) {             /* a band voice from the piano or guitar pack, at the lead level */
         int inst = lead_sound == 1 ? I_PIANO : I_GUITAR, li = inst == I_PIANO ? 2 : 3;
         int32_t keep = e->lvl[li];
@@ -274,7 +327,11 @@ static void lead_note_on(jb_t *e, int note, int vel, int wait, int len_samples, 
 }
 static void web_tick(void *ev_, int bpt_q8) {
     jb_t *e = (jb_t *)ev_;
-    if (e != &S[POS] || lead_level <= 0) return;
+    if (e != &S[POS]) return;
+    if (midi_clock && (e->state == ST_PLAY || e->state == ST_COUNT)) {   /* the engine's 12 ticks a beat -> MIDI's 24 */
+        int32_t spt_s = e->spt >> 14; mq_push(0, 0, 1, 0, 0, 1); mq_push(0, 0, 1, spt_s / 2, 0, 1);
+    }
+    if (lead_level <= 0 && !((midi_route >> 4) & 1)) return;
     const lnote_t *a = 0; int n = 0;
     if (e->state == ST_COUNT) { a = PICK; n = pick_n; }
     else if (e->state == ST_PLAY && e->kind == BK_CHART && e->bar >= 0 && e->bar < e->nbars) {
@@ -289,7 +346,8 @@ static void web_tick(void *ev_, int bpt_q8) {
         int wait = (a[i].t - lo) * spt_s / 4;
         int len = (int)((int64_t)a[i].d * spt_s / 4);
         int note = a[i].p + e->transpose + e->shift + 12 * lead_oct;
-        lead_note_on(e, note, a[i].v, wait, len, bpt_q8, (a[i].d + 2) / 4);
+        if ((midi_route >> 4) & 1) mq_push(4, note, a[i].v, wait, len, 0);
+        if (lead_level > 0) lead_note_on(e, note, a[i].v, wait, len, bpt_q8, (a[i].d + 2) / 4);
     }
 }
 static void lead_render(float *L, float *R, int frames) {
@@ -454,7 +512,9 @@ static int web_gen(void *ev) {
 EXPORT(jbw_render) void jbw_render(void) {              /* 128 frames into OUTL / OUTR, floats */
     static int tables;
     if (!tables) { lead_tables(); tables = 1; }
+    mq_n = 0;
     for (int h = 0; h < 2; h++) {
+        mq_base = h * OP1_FX_BLOCK;
         int16_t l[OP1_FX_BLOCK] = {0}, r[OP1_FX_BLOCK] = {0};
         FX_jazzband.render_stereo(POS, l, r, knobs);
         for (int n = 0; n < OP1_FX_BLOCK; n++) { OUTL[h * 64 + n] = l[n] * (1.0f / 32768.0f); OUTR[h * 64 + n] = r[n] * (1.0f / 32768.0f); }
