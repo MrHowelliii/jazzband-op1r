@@ -39,15 +39,14 @@ GLEAD_NOTES = "c3 eb3 gb3 a3 c4 eb4 gb4 a4 c5 eb5 gb5 a5 c6".split()
 
 
 def zones_glead():
-    """The melody guitar. The library's "electric" takes are the archtop's pickup straight into the desk (no
-    amplifier): alone they sound plinky and synthetic. Each note here is that pickup through a modelled jazz amp and
-    speaker (amp_cab), with a little of the room microphone of the same take for the wood and air, three different
-    takes of every note so repeated notes are not identical, firm picking."""
+    """The melody guitar: the archtop played acoustically, its room microphone alone. Two earlier tries blended it
+    with the pickup's direct signal, but the library's pickup and microphone files are separate performances, not one
+    take on two channels, so mixed they beat against each other (a phasey, robotic ring); the pickup alone, with no
+    amplifier, sounds plinky. Medium picking (a softer attack), three takes of every note, the pick click smoothed."""
     for n in GLEAD_NOTES:
         for rr in (1, 2, 3):
-            yield dict(key=mp.midi_of(n), vlo=0, vhi=127, rr=rr - 1, sec=3.0, fade=0.6, amp=True,
-                       src=[(S('karoryfer.shinyguitar', 'Samples', 'electric', f'{n}_vl3_rr{rr}_2.wav'), 1.0),
-                            (S('karoryfer.shinyguitar', 'Samples', 'acoustic', f'{n}_vl3_rr{rr}_1.wav'), 0.0)])
+            yield dict(key=mp.midi_of(n), vlo=0, vhi=127, rr=rr - 1, sec=3.0, fade=0.7, soft_attack=0.004, tone=6000,
+                       src=[(S('karoryfer.shinyguitar', 'Samples', 'acoustic', f'{n}_vl2_rr{rr}_1.wav'), 1.0)])
 
 
 def peak_eq(x, rate, f0, gain_db, q):                   # RBJ cookbook peaking filter
@@ -139,6 +138,9 @@ def build(name, inst, rate, gen, credit, out):
             x = y if x is None else (np.pad(x, (0, max(0, len(y) - len(x)))) + np.pad(y, (0, max(0, len(x) - len(y)))))
         if z.get('tone'): x = sosfilt(butter(2, z['tone'], fs=rate, output='sos'), x)
         if z.get('warm'): x = low_shelf(x, rate, *z['warm'])
+        if z.get('soft_attack'):                       # round off the pick's first few milliseconds
+            on = int(np.argmax(np.abs(x) > 0.02 * np.max(np.abs(x)))); n = int(z['soft_attack'] * rate)
+            x = x.copy(); x[:on] = 0; x[on:on + n] *= np.sin(np.linspace(0, np.pi / 2, len(x[on:on + n]))) ** 2
         z['x'] = mp.shape(x, rate, z['sec'], z.get('fade', 0.25))
         z['cents'] = 0; z['loop'] = 0
         if inst:
