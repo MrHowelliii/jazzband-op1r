@@ -39,12 +39,41 @@ GLEAD_NOTES = "c3 eb3 gb3 a3 c4 eb4 gb4 a4 c5 eb5 gb5 a5 c6".split()
 
 
 def zones_glead():
-    """The melody guitar: the archtop's pickup alone (no room microphone: that is the thin, tinny part), the medium and
-    firm picking layers, long natural sustain, the top rolled off and the body brought up a little."""
+    """The melody guitar. The library's "electric" takes are the archtop's pickup straight into the desk (no
+    amplifier): alone they sound plinky and synthetic. Each note here is that pickup through a modelled jazz amp and
+    speaker (amp_cab), with a little of the room microphone of the same take for the wood and air, three different
+    takes of every note so repeated notes are not identical, firm picking."""
     for n in GLEAD_NOTES:
-        for v, lo, hi in ((2, 0, 92), (3, 93, 127)):
-            yield dict(key=mp.midi_of(n), vlo=lo, vhi=hi, rr=0, sec=3.6, fade=0.6, tone=4200, warm=(220, 3.5),
-                       src=[(S('karoryfer.shinyguitar', 'Samples', 'electric', f'{n}_vl{v}_rr1_2.wav'), 1.0)])
+        for rr in (1, 2, 3):
+            yield dict(key=mp.midi_of(n), vlo=0, vhi=127, rr=rr - 1, sec=3.0, fade=0.6, amp=True,
+                       src=[(S('karoryfer.shinyguitar', 'Samples', 'electric', f'{n}_vl3_rr{rr}_2.wav'), 1.0),
+                            (S('karoryfer.shinyguitar', 'Samples', 'acoustic', f'{n}_vl3_rr{rr}_1.wav'), 0.0)])
+
+
+def peak_eq(x, rate, f0, gain_db, q):                   # RBJ cookbook peaking filter
+    from scipy.signal import lfilter
+    A = 10 ** (gain_db / 40); w = 2 * math.pi * f0 / rate; al = math.sin(w) / (2 * q); c = math.cos(w)
+    return lfilter([1 + al * A, -2 * c, 1 - al * A], [1 + al / A, -2 * c, 1 - al / A], x)
+
+
+def amp_cab(di, mic, rate):
+    """A clean jazz amp and a 12-inch speaker, from the pickup's direct signal: the low end tightened, a soft
+    valve-like squeeze on the attack (a little asymmetric: some even harmonics), the speaker's mid-range body and
+    its roll-off above 4-5 kHz; then 25% of the room microphone for the guitar's own acoustic sound."""
+    from scipy.signal import butter, sosfilt
+    x = sosfilt(butter(2, 80, 'highpass', fs=rate, output='sos'), di)
+    x = x / (np.max(np.abs(x)) + 1e-9)
+    d, b = 1.8, 0.12
+    x = (np.tanh(d * (x + b)) - np.tanh(d * b)) / np.tanh(d)
+    x = peak_eq(x, rate, 140, 2.0, 0.8)                 # cabinet thump
+    x = peak_eq(x, rate, 650, 4.0, 0.9)                 # speaker body
+    x = peak_eq(x, rate, 2600, -5.0, 1.2)               # the pickup's glassy edge, taken out
+    x = sosfilt(butter(4, 4600, fs=rate, output='sos'), x)   # 12-inch speaker roll-off
+    m = sosfilt(butter(2, 120, 'highpass', fs=rate, output='sos'), mic)
+    m = m / (np.max(np.abs(m)) + 1e-9)
+    n = max(len(x), len(m))
+    x = np.pad(x, (0, n - len(x))) / (np.max(np.abs(x)) + 1e-9) * float(os.environ.get("GLEAD_AMP", 1)) + float(os.environ.get("GLEAD_MIC", 0.25)) * np.pad(m, (0, n - len(m)))
+    return x
 
 
 def low_shelf(x, rate, f0, gain_db):                     # RBJ cookbook low shelf, slope 1
@@ -103,7 +132,9 @@ def build(name, inst, rate, gen, credit, out):
     zs = list(gen())
     for z in zs:
         x = None
-        for path, g in z['src']:
+        if z.get('amp'):                               # the melody guitar: pickup through an amp model, plus room mic
+            x = amp_cab(mp.load(z['src'][0][0], rate), mp.load(z['src'][1][0], rate), rate)
+        for path, g in ([] if z.get('amp') else z['src']):
             y = mp.load(path, rate) * g
             x = y if x is None else (np.pad(x, (0, max(0, len(y) - len(x)))) + np.pad(y, (0, max(0, len(x) - len(y)))))
         if z.get('tone'): x = sosfilt(butter(2, z['tone'], fs=rate, output='sos'), x)

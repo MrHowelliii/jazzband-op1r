@@ -216,7 +216,7 @@ static void web_trigger(void *e_, const void *ev_, int bpt_q8) {
 
 /* synth lead voices: float, mono, panned slightly left */
 #ifndef GLEAD_PK_G
-#define GLEAD_PK_G 1950                                 /* the melody guitar against the synth lead (web/test) */
+#define GLEAD_PK_G 1400                                 /* the melody guitar against the synth lead (web/test) */
 #endif
 #ifndef LEAD_PK_G
 #define LEAD_PK_G 1600                                  /* a sustained note sits a little under the synth lead (web/test) */
