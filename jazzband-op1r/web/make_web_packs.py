@@ -39,14 +39,20 @@ GLEAD_NOTES = "c3 eb3 gb3 a3 c4 eb4 gb4 a4 c5 eb5 gb5 a5 c6".split()
 
 
 def zones_glead():
-    """The melody guitar: the archtop played acoustically, its room microphone alone. Two earlier tries blended it
-    with the pickup's direct signal, but the library's pickup and microphone files are separate performances, not one
-    take on two channels, so mixed they beat against each other (a phasey, robotic ring); the pickup alone, with no
-    amplifier, sounds plinky. Medium picking (a softer attack), three takes of every note, the pick click smoothed."""
-    for n in GLEAD_NOTES:
-        for rr in (1, 2, 3):
-            yield dict(key=mp.midi_of(n), vlo=0, vhi=127, rr=rr - 1, sec=3.0, fade=0.7, soft_attack=0.004, tone=6000,
-                       src=[(S('karoryfer.shinyguitar', 'Samples', 'acoustic', f'{n}_vl2_rr{rr}_1.wav'), 1.0)])
+    """The melody guitar: FreePats "Electric Guitar FSBS (jazz)" (CC0), a Fender sampled direct and run through an
+    amplifier and effects for a jazz tone, as its own SFZ maps it: a soft and a firm picking layer (the split at
+    velocity 92/93) and two of its four takes of every note, so repeated notes differ. The Karoryfer archtop tried
+    before had no usable single-source take for a lead: its pickup is dry and its pickup and room mic files are
+    separate performances."""
+    d = S('freepats-eguitar-jazz')
+    sfz = open(os.path.join(d, 'EGuitarFSBS-jazz bridge 20260807.sfz')).read()
+    for g in sfz.split('<group>')[1:]:
+        key = int(re.search(r'(?:pitch_keycenter|\bkey)=(\d+)', g).group(1))
+        if not 40 <= key <= 77: continue               # a melody an octave under the page: E2 to F5 covers it
+        lo = re.search(r'lovel=(\d+)', g); hi = re.search(r'hivel=(\d+)', g)
+        for rr, smp in enumerate(re.findall(r'sample=(\S+)', g)[:2]):
+            yield dict(key=key, vlo=int(lo.group(1)) if lo else 0, vhi=int(hi.group(1)) if hi else 127, rr=rr, sec=2.6, fade=0.6,
+                       src=[(os.path.join(d, smp), 1.0)])
 
 
 def peak_eq(x, rate, f0, gain_db, q):                   # RBJ cookbook peaking filter
@@ -107,7 +113,7 @@ PACKS = [
     ('jbguitar', 3, 32000, zones_guitar, 'SHINYGUITAR - KARORYFER SAMPLES - CC0'),
     ('jbdrums', 0, 44100, zones_drums, 'VIRTUOSITY DRUMS - VERSILIAN STUDIOS - CC0'),
     ('jblead', LEAD, 32000, zones_lead, 'WERESAX ALTO SAXOPHONE - KARORYFER SAMPLES - CC0'),
-    ('jbgtrlead', GLEAD, 32000, zones_glead, 'SHINYGUITAR PICKUP - KARORYFER SAMPLES - CC0'),
+    ('jbgtrlead', GLEAD, 32000, zones_glead, 'ELECTRIC GUITAR FSBS JAZZ - FREEPATS - CC0'),
 ]
 
 
