@@ -1907,6 +1907,9 @@ static void render_voice(jb_t *e, voice_t *v, int32_t *L, int32_t *R, int32_t *G
     int start = 0;
     if (v->wait >= OP1_FX_BLOCK) { v->wait -= OP1_FX_BLOCK; return; }
     if (v->wait > 0) { start = v->wait; v->wait = 0; }
+#ifdef JB_VOICE_HOOK                                     /* web build: a player's expression on a lead voice (pitch) */
+    if (v->type == VT_PK) JB_VOICE_HOOK(e, v);
+#endif
     int32_t g0 = v->gprev;
     v->g = mul30(v->g, v->dec);
     if (v->len > 0) v->len--; else v->g = mul30(v->g, v->rel);

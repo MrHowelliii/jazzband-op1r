@@ -13,6 +13,8 @@
 static void web_tick(void *ev, int bpt_q8);
 static void web_trigger(void *e, const void *ev, int bpt_q8);
 #define JB_GEN_HOOK(e) web_gen((void *)(e))
+#define JB_VOICE_HOOK(e, v) web_voice((void *)(e), (void *)(v))
+static void web_voice(void *e, void *v);
 static int web_gen(void *e);
 #include "../plugins/jazzband/jazzband.c"
 
@@ -242,31 +244,114 @@ static void lead_tables(void) {
     for (int n = 70; n < 128; n++) { f *= r; FREQ[n] = (float)f; }
     f = 440.0; for (int n = 68; n >= 0; n--) { f /= r; FREQ[n] = (float)f; }
 }
+
+/* ---- the melody guitar's expression. A sampler playing a lead sheet picks every note the same way and holds it
+ * dead still; a guitarist slides into some notes, hammers on and pulls off between close ones, and bends held notes
+ * with finger vibrato (on a guitar the pitch only goes up). Per voice: the pitch in cents around the note, applied
+ * to the sample step once a block (web_voice, called from render_voice). */
+static uint32_t lead_clock;                              /* samples rendered (jbw_render) */
+typedef struct {
+    const uint8_t *d; const jbzone_t *z; int note;       /* the voice this belongs to (its zone data), the note */
+    float slide, slide_k;                                /* cents below the note, and how fast it closes (per block) */
+    float vib, vib_rate, vib_max, vib_ph; int age, vib_at, vib_ramp;   /* vibrato depth now, its target, timing in blocks */
+    int pend_wait, pend_note, pend_len;                  /* a hammer-on / pull-off to come, samples from now */
+} gx_t;
+static gx_t GX[JB_VOICES];
+static uint32_t gx_inc(const jbzone_t *z, int note) {
+    int d = note - z->key; if (d < -48) d = -48; if (d > 48) d = 48;
+    return ((JB_RATIO[d + 48] >> 2) * (z->step >> 2)) >> 12;
+}
+static float gx_ratio(float c) { float x = c * 0.000577623f; return 1.0f + x * (1.0f + x * (0.5f + x * 0.16666667f)); }   /* 2^(c/1200) */
+static void gx_vibrato(gx_t *g, int len_samples) {      /* held notes: finger vibrato fades in after a moment */
+    int blocks = len_samples / OP1_FX_BLOCK;
+    g->vib = 0; g->vib_ph = 0;
+    if (len_samples < 44100 * 40 / 100 || !human) { g->vib_max = 0; return; }
+    g->vib_rate = (4.8f + hrand(140) / 100.0f) * OP1_FX_BLOCK / 44100.0f;      /* 4.8 .. 6.2 Hz, in cycles a block */
+    g->vib_max = (14 + hrand(14)) * (len_samples > 44100 ? 1.3f : 1.0f);       /* cents, upward */
+    g->vib_at = g->age + (int)(blocks * (0.25f + hrand(15) / 100.0f));         /* a quarter to 40% into the note */
+    g->vib_ramp = 180 + hrand(160);                                             /* about 0.3 .. 0.5 s to full depth */
+}
+static void gx_start(jb_t *e, voice_t *v, const jbzone_t *z, int note, int len_samples, int prev_note, int gap) {
+    gx_t *g = &GX[v - e->v];
+    g->d = v->pk_d; g->z = z; g->note = note; g->age = 0; g->pend_wait = -1; g->slide = 0;
+    int up = note - prev_note;
+    /* a slide into the note: more on longer notes and on steps up from a note just played */
+    int p = len_samples > 44100 / 2 ? 30 : len_samples > 44100 / 4 ? 16 : 0;
+    if (gap < 4000 && up > 0 && up <= 4) p += 14;
+    if (human && hrand(100) < p) {
+        g->slide = (hrand(100) < 75 ? 100.0f : 200.0f) * (0.85f + hrand(30) / 100.0f);
+        g->slide_k = 0.90f + hrand(40) / 1000.0f;       /* most of it gone in 30 .. 70 ms */
+        v->pk_inc = (uint32_t)(gx_inc(z, note) / gx_ratio(g->slide));
+    }
+    gx_vibrato(g, len_samples);
+}
+static int gx_legato(voice_t *v, int note, int wait, int len_samples) {
+    jb_t *e = &S[POS]; gx_t *g = &GX[v - e->v];
+    if (g->d != v->pk_d || note - g->z->key > 5 || g->z->key - note > 5) return 0;  /* too far from this sample */
+    g->pend_wait = wait; g->pend_note = note; g->pend_len = len_samples;
+    v->len += (wait + len_samples) / OP1_FX_BLOCK;      /* the string keeps sounding through the new note */
+    return 1;
+}
+static void web_voice(void *e_, void *v_) {
+    jb_t *e = (jb_t *)e_; voice_t *v = (voice_t *)v_;
+    gx_t *g = &GX[v - e->v];
+    if (g->d != v->pk_d || !g->z) return;                /* not a melody guitar voice */
+    g->age++;
+    if (g->pend_wait >= 0) {
+        g->pend_wait -= OP1_FX_BLOCK;
+        if (g->pend_wait < 0) {                          /* the hammer-on lands: a quick glide, the note's own length */
+            g->slide = (float)(g->pend_note - g->note) * -100.0f;
+            g->slide_k = 0.55f; g->note = g->pend_note;
+            v->len = g->pend_len / OP1_FX_BLOCK + 3; v->g = mul30(v->g, 30500);  /* a little softer than a picked note */
+            gx_vibrato(g, g->pend_len);
+            g->vib_at = g->age + (g->vib_at - g->age);
+        }
+    }
+    if (g->slide > 0.5f || g->slide < -0.5f) g->slide *= g->slide_k; else g->slide = 0;
+    float c = -g->slide;
+    if (g->vib_max > 0 && g->age >= g->vib_at) {
+        float k = (float)(g->age - g->vib_at) / (float)g->vib_ramp; if (k > 1) k = 1;
+        g->vib_ph += g->vib_rate; if (g->vib_ph >= 1) g->vib_ph -= 1;
+        c += g->vib_max * k * 0.5f * (1.0f - fsin(g->vib_ph + 0.25f));
+    }
+    v->pk_inc = (uint32_t)(gx_inc(g->z, g->note) * gx_ratio(c));
+}
 static void lead_note_on(jb_t *e, int note, int vel, int wait, int len_samples, int bpt_q8, int dur_ticks) {
     if (note < 0) note = 0; if (note > 127) note = 127;
     if (lead_sound == 2 && PKS.ok[PK_GLEAD]) {             /* the melody guitar: its own pack, an octave under the page
-                                                           * (guitar sounds an octave below written), notes ring their length */
-        static voice_t *prev; static const uint8_t *prev_d;
-        int n2 = note - 12, vel2 = vel + 6 + htri(6) * human / 60; if (vel2 < 20) vel2 = 20; if (vel2 > 127) vel2 = 127;
+                                                           * (guitar sounds an octave below written), played like a player
+                                                           * plays a head: see gx_* (slides, hammer-ons, vibrato) */
+        static voice_t *prev; static const uint8_t *prev_d; static int prev_note, prev_end;
+        int n2 = note - 12, vel2 = vel + 6 + htri(8) * human / 60; if (vel2 < 20) vel2 = 20; if (vel2 > 127) vel2 = 127;
+        int lay = (60 + hrand(140)) * human / 60;         /* a little behind the beat */
+        int start = (int)lead_clock + wait + lay, step = n2 - prev_note; if (step < 0) step = -step;
+        int ours = prev && prev->active && prev->type == VT_PK && prev->pk_d == prev_d;
+        /* a hammer-on or pull-off: the next note a tone or less away, straight after this one and short: the same
+         * string keeps ringing at the new pitch, no new pick attack */
+        if (ours && human && step >= 1 && step <= 2 && prev->len > 0 && start - prev_end < 2200 && start - prev_end > -2200
+            && len_samples < 44100 * 45 / 100 && hrand(100) < 55 && gx_legato(prev, n2, wait + lay, len_samples)) {
+            prev_note = n2; prev_end = start + len_samples;
+            return;
+        }
         const jbzone_t *pz = pk_zone(PK_GLEAD, n2, vel2);
         if (pz) {
-            if (prev && prev->active && prev->type == VT_PK && prev->pk_d == prev_d) { prev->len = 0; prev->rel = 30400; }   /* one line: lift the last finger */
+            if (ours) { prev->len = 0; prev->rel = 30400; }    /* one line: lift the last finger */
             voice_t *pv = alloc_voice(e, JB_GTRV, JB_VOICES);
             for (int i = 0; i < 7; i++) { pv->ph[i] = 0; pv->inc[i] = 0; }
             for (int i = 0; i < 4; i++) { pv->pa[i] = 0; pv->pd[i] = 32767; }
             pv->hx = pv->hy = pv->hx2 = pv->hy2 = 0; pv->np = 0; pv->pitch = 0;
             pv->active = 1; pv->dec = 32767; pv->rel = 31400; pv->pl = 23800; pv->pr = 22500;
-            int d = n2 - pz->key; if (d < -48) d = -48; if (d > 48) d = 48;
             const jbpack_t *pk = PKS.ok[PK_GLEAD];
             pv->type = VT_PK; pv->pk_d = pk_data(pk) + pz->off; pv->pk_len = (int32_t)pz->len; pv->pk_pos = 0;
             pv->pk_codec = pz->codec; pv->pk_pred = pz->pred; pv->pk_idx = pz->idx; pv->pk_loop = 0;
-            pv->pk_inc = ((JB_RATIO[d + 48] >> 2) * (pz->step >> 2)) >> 12;
+            pv->pk_inc = gx_inc(pz, n2);
             pv->pk_s0 = pk_next(pv); pv->pk_s1 = pk_next(pv); pv->pk_frac = 0;
             int dyn = 52 + ((vel2 * 76) >> 7);
             pv->g = mul30(dyn * G(GLEAD_PK_G), (lead_level * 40960) >> 15); pv->gprev = 0;
             pv->len = len_samples / OP1_FX_BLOCK + 3; if (pv->len < 8) pv->len = 8;
-            pv->wait = wait + (60 + hrand(140)) * human / 60;
-            prev = pv; prev_d = pv->pk_d;
+            pv->wait = wait + lay;
+            gx_start(e, pv, pz, n2, len_samples, prev_note, start - prev_end);
+            prev = pv; prev_d = pv->pk_d; prev_note = n2; prev_end = start + len_samples;
             return;
         }
     }
@@ -512,7 +597,7 @@ static int web_gen(void *ev) {
 EXPORT(jbw_render) void jbw_render(void) {              /* 128 frames into OUTL / OUTR, floats */
     static int tables;
     if (!tables) { lead_tables(); tables = 1; }
-    mq_n = 0;
+    mq_n = 0; lead_clock += 128;
     for (int h = 0; h < 2; h++) {
         mq_base = h * OP1_FX_BLOCK;
         int16_t l[OP1_FX_BLOCK] = {0}, r[OP1_FX_BLOCK] = {0};

@@ -69,6 +69,23 @@ check(r4 > r0 * 0.4 && r4 < r0 * 1.0, `sax lead sits a little under the synth le
 { const [fg, rg] = alone(2);                       // the melody guitar: an octave under the page, about as loud as the sax
   check(Math.abs(fg - 220) < 5, `guitar lead plays the A4 melody note as A3, where a guitarist plays it (${fg.toFixed(1)} Hz)`);
   check(rg > r4 * 0.6 && rg < r4 * 1.6, `guitar lead sits with the sax (rms ${rg.toFixed(3)} vs ${r4.toFixed(3)})`); }
+// the melody guitar's expression: finger vibrato on a held note (upward, a few Hz), none when the band is exact
+{ const track = (hum) => {
+    X.jbw_stop(); X.jbw_human(hum); X.jbw_lead_sound(2, 30000, 0); for (let i = 0; i < 600; i++) X.jbw_render(); X.jbw_play(-1);
+    const buf = new Float32Array(128 * Math.floor(sr * 4 / 128));
+    for (let i = 0; i < buf.length / 128; i++) { X.jbw_render(); buf.set(new Float32Array(X.memory.buffer, X.jbw_out_l(), 128), i * 128); }
+    const cents = [];                                  // pitch every 10 ms in bar 1, around A3 (220 Hz)
+    for (let t = sr * 2.9; t < sr * 3.9; t += sr / 100) {
+      const seg = buf.subarray(t, t + 2048); let best = -1, bl = 0;
+      for (let lag = 150; lag < 260; lag++) { let s2 = 0; for (let i = 0; i < 1500; i++) s2 += seg[i] * seg[i + lag]; if (s2 > best) { best = s2; bl = lag; } }
+      cents.push(1200 * Math.log2(sr / bl / 220));
+    }
+    return Math.max(...cents) - Math.min(...cents);
+  };
+  const still = track(0), moving = track(100);
+  check(still < 10 && moving > 12, `guitar lead: finger vibrato on a held note (${moving.toFixed(0)} cents of movement; ${still.toFixed(0)} with the band exact)`);
+  X.jbw_human(60);
+}
 // a held note (two tied bars and more) keeps sounding: the sax zone loops inside its steady tone
 { X.jbw_stop(); X.jbw_lead_sound(6, 30000, 0);
   dv().setUint16(LN + 4, 1500, true);                     // bar 1: 1500 / 48 quarter notes = 15.6 s at 120 BPM
