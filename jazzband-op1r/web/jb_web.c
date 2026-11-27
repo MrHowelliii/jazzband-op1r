@@ -7,6 +7,9 @@
  * Songs come in as bars of per-beat chords (jbw_load) and a melody (jbw_lead_*). The OP-1 screen and knobs are not
  * used: the page sets the engine's fields (tempo, feel, players, loops, choruses...) directly. */
 #define JB_WEB 1
+#ifndef __wasm__
+#include <string.h>                                      /* a native build (the iOS app) has libc */
+#endif
 #define JB_MAXBARS 512
 #define JB_TICK_HOOK(e, bpt) web_tick((void *)(e), (bpt))
 #define JB_TRIGGER_HOOK(e, ev, bpt) web_trigger((void *)(e), (const void *)(ev), (bpt))
@@ -19,7 +22,11 @@ static int web_gen(void *e);
 #include "../plugins/jazzband/jazzband.c"
 
 int host_lines_n;
+#ifdef __wasm__
 #define EXPORT(name) __attribute__((export_name(#name)))
+#else                                                    /* a native build (the iOS app): ordinary C functions */
+#define EXPORT(name)
+#endif
 
 /* ------------------------------------------------------------------ memory for the sound packs (bump allocator) */
 static uint8_t ARENA[44u << 20] __attribute__((aligned(16)));
@@ -38,6 +45,29 @@ EXPORT(jbw_add_pack) int jbw_add_pack(const uint8_t *p) {
     PKS.state = 0; PKS.cur = -1;
     return 1;
 }
+#ifndef __wasm__
+/* a native build: a .jbp file is laid out for a 32-bit target (op1_fx_t is 16 bytes there, with its 4-byte function
+ * pointers). Rebuild the header in this machine's layout in the arena, the audio right after it, and register that. */
+int jbw_add_pack_file(const uint8_t *f, uint32_t n) {
+    enum { F_PRESS = 8, F_MAGIC = 16, F_CREDIT = 48, F_ZONES = 144 };
+    if (n < F_ZONES) return 0;
+    jbpack_t *h = (jbpack_t *)jbw_alloc(sizeof(jbpack_t));
+    if (!h) return 0;
+    const uint32_t *w = (const uint32_t *)(f + F_MAGIC);   /* magic[2], inst, nzones, data_off, data_len, sum, version */
+    uint32_t file_data_off = w[4], data_len = w[5];
+    if (file_data_off > n || data_len > n - file_data_off) return 0;
+    uint8_t *data = jbw_alloc(data_len);
+    if (!data) return 0;
+    memset(h, 0, sizeof *h);
+    memcpy(h->fx.press, f + F_PRESS, 4);
+    h->magic[0] = w[0]; h->magic[1] = w[1]; h->inst = w[2]; h->nzones = w[3]; h->data_len = data_len; h->sum = w[6]; h->version = w[7];
+    memcpy(h->credit, f + F_CREDIT, 96);
+    memcpy(h->zone, f + F_ZONES, sizeof h->zone);
+    memcpy(data, f + file_data_off, data_len);
+    h->data_off = (uint32_t)(data - (uint8_t *)h);
+    return jbw_add_pack((const uint8_t *)h);
+}
+#endif
 EXPORT(jbw_pack_ok) int jbw_pack_ok(int inst) { return inst >= 0 && inst < PK_N && PKS.ok[inst] != 0; }
 
 /* ------------------------------------------------------------------ engine */
@@ -607,6 +637,7 @@ EXPORT(jbw_render) void jbw_render(void) {              /* 128 frames into OUTL 
     lead_render(OUTL, OUTR, 128);
 }
 
+#ifdef __wasm__
 /* memcpy / memset for struct copies (no libc) */
 void *memcpy(void *d, const void *s, unsigned long n) { uint8_t *a = d; const uint8_t *b = s; while (n--) *a++ = *b++; return d; }
 void *memset(void *d, int c, unsigned long n) { uint8_t *a = d; while (n--) *a++ = (uint8_t)c; return d; }
@@ -615,3 +646,4 @@ void *memmove(void *d, const void *s, unsigned long n) {
     if (a < b) while (n--) *a++ = *b++; else { a += n; b += n; while (n--) *--a = *--b; }
     return d;
 }
+#endif
